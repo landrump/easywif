@@ -96,12 +96,14 @@ def debug_log(message: str):
     
     # Write to debug file
     try:
-        with open("C:/resource_planning_app/debug.txt", "a", encoding="utf-8") as f:
+        with open("debug.txt", "a", encoding="utf-8") as f:
             f.write(debug_message + "\n")
     except Exception as e:
-        # Only show debug file errors in Streamlit
-        debug_log(f"Debug file write error: {e}")
-
+        # Avoid infinite recursion - just print to console if file write fails
+        try:
+            print(f"Debug file write error: {e}")
+        except:
+            pass  # If even print fails, just ignore it
 
 # ============================================================
 # App config (MUST be defined before loaders use them)
