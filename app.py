@@ -91,19 +91,8 @@ if not check_password():
 # Debug logging function
 def debug_log(message: str):
     """Write debug message to file only"""
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    debug_message = f"[{timestamp}] {message}"
-    
-    # Write to debug file
-    try:
-        with open("debug.txt", "a", encoding="utf-8") as f:
-            f.write(debug_message + "\n")
-    except Exception as e:
-        # Avoid infinite recursion - just print to console if file write fails
-        try:
-            print(f"Debug file write error: {e}")
-        except:
-            pass  # If even print fails, just ignore it
+    # Temporarily disabled for cloud deployment
+    pass
 
 # ============================================================
 # App config (MUST be defined before loaders use them)
