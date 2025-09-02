@@ -91,8 +91,20 @@ if not check_password():
 # Debug logging function
 def debug_log(message: str):
     """Write debug message to file only"""
-    # Temporarily disabled for cloud deployment
-    pass
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    debug_message = f"[{timestamp}] {message}"
+    
+    # Write to debug file
+    try:
+        with open("debug.txt", "a", encoding="utf-8") as f:
+            f.write(debug_message + "\n")
+    except Exception as e:
+        # Avoid infinite recursion - just print to console if file write fails
+        try:
+            print(f"Debug file write error: {e}")
+        except:
+            pass  # If even print fails, just ignore it
+
 
 # ============================================================
 # App config (MUST be defined before loaders use them)
@@ -655,6 +667,15 @@ st.markdown(
             border-radius: 10px !important;
             border: 1px solid rgba(255,255,255,0.25) !important;
           }
+          
+          /* Mobile-specific button sizing */
+          @media (max-width: 768px) {
+            .stButton > button {
+              height: 44px !important;
+              font-size: 14px !important;
+              padding: 8px 16px !important;
+            }
+          }
           .co-subhead { font-weight: 700; font-size: 1.0rem; margin-top: 0.25rem; }
           .co-help { font-size: 0.9rem; opacity: 0.9; margin-bottom: 0.25rem; }
           
@@ -843,6 +864,122 @@ if st.session_state.get("pending_reset_controls", False):
         st.session_state.pop(k, None)
     st.session_state["pending_reset_controls"] = False
     st.rerun()
+
+# ============================================================
+# Mobile Sidebar Toggle (only visible on mobile)
+# ============================================================
+# Add custom CSS for mobile sidebar toggle
+st.markdown("""
+<style>
+/* Mobile sidebar toggle button */
+.mobile-sidebar-toggle {
+    display: none;
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 1000;
+    background: #0078d4;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+}
+
+/* Show toggle button only on mobile */
+@media (max-width: 768px) {
+    .mobile-sidebar-toggle {
+        display: block;
+    }
+    
+    /* Hide default Streamlit sidebar on mobile */
+    .css-1d391kg {
+        display: none;
+    }
+    
+    /* Show sidebar when mobile menu is open */
+    .css-1d391kg.mobile-open {
+        display: block;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 999;
+        background: rgba(0,0,0,0.8);
+    }
+}
+
+/* Ensure sidebar content is mobile-friendly */
+.sidebar .sidebar-content {
+    padding: 1rem;
+    overflow-y: auto;
+    max-height: 100vh;
+}
+
+/* Mobile-friendly filter buttons */
+@media (max-width: 768px) {
+    .slicer-button {
+        padding: 8px 12px;
+        font-size: 12px;
+        min-width: 60px;
+    }
+    
+    .stButton > button {
+        height: 44px !important;
+        font-size: 14px !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Mobile sidebar toggle button
+if st.button("☰", key="mobile_sidebar_toggle", help="Toggle sidebar on mobile", 
+             use_container_width=False, type="secondary"):
+    st.session_state["mobile_sidebar_open"] = not st.session_state.get("mobile_sidebar_open", False)
+
+# Add JavaScript for mobile sidebar toggle
+st.markdown("""
+<script>
+// Mobile sidebar toggle functionality
+function toggleMobileSidebar() {
+    const sidebar = document.querySelector('.css-1d391kg');
+    const toggleBtn = document.querySelector('[data-testid="baseButton-secondary"]');
+    
+    if (sidebar) {
+        if (sidebar.classList.contains('mobile-open')) {
+            sidebar.classList.remove('mobile-open');
+            if (toggleBtn) toggleBtn.textContent = '☰';
+        } else {
+            sidebar.classList.add('mobile-open');
+            if (toggleBtn) toggleBtn.textContent = '✕';
+        }
+    }
+}
+
+// Add click event to toggle button
+document.addEventListener('DOMContentLoaded', function() {
+    const toggleBtn = document.querySelector('[data-testid="baseButton-secondary"]');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', toggleMobileSidebar);
+    }
+});
+
+// Close sidebar when clicking outside on mobile
+document.addEventListener('click', function(e) {
+    const sidebar = document.querySelector('.css-1d391kg.mobile-open');
+    const toggleBtn = document.querySelector('[data-testid="baseButton-secondary"]');
+    
+    if (sidebar && !sidebar.contains(e.target) && !toggleBtn.contains(e.target)) {
+        sidebar.classList.remove('mobile-open');
+        if (toggleBtn) toggleBtn.textContent = '☰';
+    }
+});
+</script>
+""", unsafe_allow_html=True)
 
 # ============================================================
 # Sidebar: Data + Filters + Change Options (restored layout)
