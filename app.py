@@ -872,13 +872,13 @@ if st.session_state.get("pending_reset_controls", False):
     st.rerun()
 
 # ============================================================
-# Mobile Sidebar Toggle (only visible on mobile)
+# Mobile Sidebar Toggle & Configuration
 # ============================================================
 # Add custom CSS for mobile sidebar toggle
 st.markdown("""
 <style>
 /* Mobile sidebar toggle button */
-.mobile-sidebar-toggle {
+.mobile-toggle-btn {
     display: none;
     position: fixed;
     top: 10px;
@@ -893,59 +893,92 @@ st.markdown("""
     font-size: 20px;
     cursor: pointer;
     box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    transition: all 0.2s ease;
+}
+
+.mobile-toggle-btn:hover {
+    background: #106ebe;
+    transform: scale(1.1);
 }
 
 /* Show toggle button only on mobile */
 @media (max-width: 768px) {
-    .mobile-sidebar-toggle {
+    .mobile-toggle-btn {
         display: block;
     }
     
     /* Hide default Streamlit sidebar on mobile */
     .css-1d391kg {
-        display: none;
+        display: none !important;
     }
     
     /* Show sidebar when mobile menu is open */
     .css-1d391kg.mobile-open {
-        display: block;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        z-index: 999;
-        background: rgba(0,0,0,0.8);
-    }
-}
-
-/* Ensure sidebar content is mobile-friendly */
-.sidebar .sidebar-content {
-    padding: 1rem;
-    overflow-y: auto;
-    max-height: 100vh;
-}
-
-/* Mobile-friendly filter buttons */
-@media (max-width: 768px) {
-    .slicer-button {
-        padding: 8px 12px;
-        font-size: 12px;
-        min-width: 60px;
+        display: block !important;
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        z-index: 999 !important;
+        background: rgba(0,0,0,0.9) !important;
+        overflow-y: auto !important;
     }
     
+    /* Mobile-friendly button sizing */
     .stButton > button {
         height: 44px !important;
         font-size: 14px !important;
+        padding: 8px 16px !important;
+        min-height: 44px !important;
     }
+    
+    /* Mobile-friendly filter buttons */
+    .slicer-button {
+        padding: 8px 12px !important;
+        font-size: 12px !important;
+        min-width: 60px !important;
+        height: 44px !important;
+    }
+    
+    /* Mobile-friendly form elements */
+    .stSelectbox > div > div {
+        min-height: 44px !important;
+    }
+    
+    .stTextInput > div > div {
+        min-height: 44px !important;
+    }
+}
+
+/* Desktop sidebar remains unchanged */
+@media (min-width: 769px) {
+    .css-1d391kg {
+        min-width: 320px !important;
+    }
+}
+
+/* Ensure consistent button styling across devices */
+.stButton > button {
+    white-space: nowrap !important;
+    border-radius: 10px !important;
+    border: 1px solid rgba(255,255,255,0.25) !important;
+    transition: all 0.2s ease !important;
+}
+
+.stButton > button:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# Mobile sidebar toggle button
-if st.button("☰", key="mobile_sidebar_toggle", help="Toggle sidebar on mobile", 
-             use_container_width=False, type="secondary"):
-    st.session_state["mobile_sidebar_open"] = not st.session_state.get("mobile_sidebar_open", False)
+# Mobile sidebar toggle button (only visible on mobile)
+col1, col2, col3 = st.columns([1, 2, 1])
+with col1:
+    if st.button("☰", key="mobile_sidebar_toggle", help="Toggle sidebar on mobile", 
+                 use_container_width=False, type="secondary"):
+        st.session_state["mobile_sidebar_open"] = not st.session_state.get("mobile_sidebar_open", False)
 
 # Add JavaScript for mobile sidebar toggle
 st.markdown("""
@@ -976,6 +1009,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Close sidebar when clicking outside on mobile
 document.addEventListener('click', function(e) {
+    const sidebar = document.querySelector('.css-1d391kg.mobile-open');
+    const toggleBtn = document.querySelector('[data-testid="baseButton-secondary"]');
+    
+    if (sidebar && !sidebar.contains(e.target) && !toggleBtn.contains(e.target)) {
+        sidebar.classList.remove('mobile-open');
+        if (toggleBtn) toggleBtn.textContent = '☰';
+    }
+});
+
+// Handle mobile touch events
+document.addEventListener('touchstart', function(e) {
     const sidebar = document.querySelector('.css-1d391kg.mobile-open');
     const toggleBtn = document.querySelector('[data-testid="baseButton-secondary"]');
     
