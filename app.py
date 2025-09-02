@@ -37,9 +37,12 @@ def check_password():
     if "password_correct" not in st.session_state:
         st.markdown("""
         <div style="text-align: center; padding: 2rem;">
-            <h1 style="color: #0071C5; margin-bottom: 1rem;">Resource Planning</h1>
-            <p style="color: #FAFAFA; font-size: 1.1rem; margin-bottom: 2rem;">
-                Secure access to resource planning and analysis tools
+            <h1 style="color: #0071C5; margin-bottom: 1rem;">EasyWIF</h1>
+            <p style="color: #FAFAFA; font-size: 1.1rem; margin-bottom: 1rem;">
+                Proof of Concept Only - Using Dummy Data
+            </p>
+            <p style="color: #FAFAFA; font-size: 0.9rem; margin-bottom: 2rem;">
+                For questions please contact Paul Landrum
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -63,9 +66,12 @@ def check_password():
     else:
         st.markdown("""
         <div style="text-align: center; padding: 2rem;">
-            <h1 style="color: #0071C5; margin-bottom: 1rem;">Resource Planning</h1>
-            <p style="color: #FAFAFA; font-size: 1.1rem; margin-bottom: 2rem;">
-                Secure access to resource planning and analysis tools
+            <h1 style="color: #0071C5; margin-bottom: 1rem;">EasyWIF</h1>
+            <p style="color: #FAFAFA; font-size: 1.1rem; margin-bottom: 1rem;">
+                Proof of Concept Only - Using Dummy Data
+            </p>
+            <p style="color: #FAFAFA; font-size: 0.9rem; margin-bottom: 2rem;">
+                For questions please contact Paul Landrum
             </p>
         </div>
         """, unsafe_allow_html=True)
