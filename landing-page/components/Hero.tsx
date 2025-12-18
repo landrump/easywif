@@ -37,6 +37,20 @@ export default function Hero() {
               </li>
             </ul>
 
+            {/* Mobile: Hero Image below bullets */}
+            <div className="md:hidden pt-6">
+              <div className="relative overflow-hidden rounded-lg shadow-xl">
+                <Image
+                  src="/EasyWIF_Hero.png"
+                  alt="EasyWIF Dashboard Screenshot"
+                  width={800}
+                  height={600}
+                  className="rounded-lg shadow-xl w-full h-auto"
+                  priority
+                />
+              </div>
+            </div>
+
             {/* CTAs */}
             <div className="flex flex-col sm:flex-row gap-4 pt-6">
               <a
@@ -54,8 +68,8 @@ export default function Hero() {
             </div>
           </div>
 
-          {/* Right Side - Visual */}
-          <div className="relative overflow-hidden rounded-lg shadow-xl">
+          {/* Right Side - Visual (Desktop Only) */}
+          <div className="hidden md:block relative overflow-hidden rounded-lg shadow-xl">
             <Image
               src="/EasyWIF_Hero.png"
               alt="EasyWIF Dashboard Screenshot"

@@ -5,17 +5,17 @@ export default function HowItWorks() {
     {
       title: 'Filter Data',
       description: 'Quickly filter your forecast or plan by project, team, time period, or any dimension that matters.',
-      mobileImage: '/HIW_Mobile_Step1.jpg',
+      mobileImage: '/HIW_Mobile_Step1.PNG',
     },
     {
       title: 'Make a Change',
       description: 'Apply what-if scenarios: shift timelines, adjust resources, change priorities, or model new initiatives.',
-      mobileImage: '/HIW_Mobile_Step2.jpg',
+      mobileImage: '/HIW_Mobile_Step2.PNG',
     },
     {
       title: 'Review Impact',
       description: 'See before vs after comparisons instantly. Understand capacity, spend, and schedule implications at a glance.',
-      mobileImage: '/HIW_Mobile_Step3.jpg',
+      mobileImage: '/HIW_Mobile_Step3.PNG',
     },
   ]
 
