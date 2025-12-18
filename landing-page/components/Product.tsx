@@ -92,13 +92,13 @@ export default function Product() {
         {/* Optional: Save & Export Callout */}
         <div className="bg-white rounded-lg p-8 shadow-md">
           <div className="grid md:grid-cols-2 gap-8 items-center">
-            <div className="overflow-hidden rounded-lg" style={{ height: '200px' }}>
+            <div>
               <Image
-                src="/EasyWIF_Save and Export.PNG"
+                src="/EasyWIF_Save and Export_New.png"
                 alt="EasyWIF Save and Export Feature"
-                width={600}
-                height={200}
-                className="w-full h-full object-cover"
+                width={800}
+                height={600}
+                className="rounded-lg shadow-xl w-full h-auto"
               />
             </div>
             <div className="space-y-3">
