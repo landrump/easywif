@@ -90,23 +90,23 @@ export default function Product() {
         </div>
 
         {/* Optional: Save & Export Callout */}
-        <div className="bg-white rounded-lg p-8 shadow-md">
-          <div className="grid md:grid-cols-2 gap-8 items-center">
-            <div>
-              <Image
-                src="/EasyWIF_Save and Export_New.png"
-                alt="EasyWIF Save and Export Feature"
-                width={800}
-                height={600}
-                className="rounded-lg shadow-xl w-full h-auto"
-              />
-            </div>
-            <div className="space-y-3">
-              <h4 className="text-xl font-semibold text-navy">Save & Export</h4>
-              <p className="text-navy-light">
-                Save scenarios for presentations. Export updated data to avoid rework.
-              </p>
-            </div>
+        <div className="grid md:grid-cols-2 gap-12 items-center mb-20">
+          <div className="space-y-4">
+            <h3 className="text-2xl md:text-3xl font-bold text-navy">
+              Save & Export
+            </h3>
+            <p className="text-navy-light">
+              Save scenarios for presentations. Export updated data to avoid rework.
+            </p>
+          </div>
+          <div>
+            <Image
+              src="/EasyWIF_Save and Export_New.png"
+              alt="EasyWIF Save and Export Feature"
+              width={800}
+              height={600}
+              className="rounded-lg shadow-xl w-full h-auto"
+            />
           </div>
         </div>
       </div>

@@ -35,10 +35,6 @@ export default function EarlyAccess() {
             </div>
           ))}
         </div>
-
-        <p className="text-center text-navy-light italic max-w-2xl mx-auto">
-          Built from real-world planning pain in large orgs — redesigned to be simple.
-        </p>
       </div>
     </section>
   )

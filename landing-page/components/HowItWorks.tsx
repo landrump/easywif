@@ -5,14 +5,17 @@ export default function HowItWorks() {
     {
       title: 'Filter Data',
       description: 'Quickly filter your forecast or plan by project, team, time period, or any dimension that matters.',
+      mobileImage: '/HIW_Mobile_Step1.jpg',
     },
     {
       title: 'Make a Change',
       description: 'Apply what-if scenarios: shift timelines, adjust resources, change priorities, or model new initiatives.',
+      mobileImage: '/HIW_Mobile_Step2.jpg',
     },
     {
       title: 'Review Impact',
       description: 'See before vs after comparisons instantly. Understand capacity, spend, and schedule implications at a glance.',
+      mobileImage: '/HIW_Mobile_Step3.jpg',
     },
   ]
 
@@ -28,8 +31,8 @@ export default function HowItWorks() {
           </p>
         </div>
 
-        {/* Main Image */}
-        <div className="mb-12 overflow-hidden rounded-lg shadow-lg" style={{ height: '500px' }}>
+        {/* Main Image - Desktop Only */}
+        <div className="hidden md:block mb-12 overflow-hidden rounded-lg shadow-lg" style={{ height: '500px' }}>
           <div style={{ height: '100%', overflow: 'hidden' }}>
             <Image
               src="/EasyWIF_HowItWorks.jpg"
@@ -41,16 +44,30 @@ export default function HowItWorks() {
           </div>
         </div>
 
-        {/* Step Cards */}
-        <div className="grid md:grid-cols-3 gap-8">
+        {/* Step Cards - Desktop: Grid, Mobile: Stacked with images */}
+        <div className="space-y-8 md:space-y-0 md:grid md:grid-cols-3 md:gap-8">
           {steps.map((step, index) => (
-            <div key={index} className="bg-gray-50 p-6 rounded-lg">
-              <h3 className="text-xl font-semibold text-navy mb-3">
-                {step.title}
-              </h3>
-              <p className="text-navy-light">
-                {step.description}
-              </p>
+            <div key={index} className="space-y-6">
+              {/* Text content - Mobile: Show first, Desktop: Show in card */}
+              <div className="bg-gray-50 p-6 rounded-lg">
+                <h3 className="text-xl font-semibold text-navy mb-3">
+                  {step.title}
+                </h3>
+                <p className="text-navy-light">
+                  {step.description}
+                </p>
+              </div>
+              
+              {/* Mobile: Show image below text */}
+              <div className="md:hidden">
+                <Image
+                  src={step.mobileImage}
+                  alt={`${step.title} - Step ${index + 1}`}
+                  width={600}
+                  height={400}
+                  className="rounded-lg shadow-lg w-full h-auto"
+                />
+              </div>
             </div>
           ))}
         </div>

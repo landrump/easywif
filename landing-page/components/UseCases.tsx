@@ -81,7 +81,7 @@ export default function UseCases() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-12">
           <h2 className="text-3xl md:text-4xl font-bold text-navy mb-4">
-            Works anywhere plans change.
+            Works with any business where plans change.
           </h2>
           <p className="text-xl text-navy-light max-w-3xl mx-auto">
             If your business uses forecasts, capacity plans, or project roadmaps — EasyWIF helps you model change quickly.
@@ -110,10 +110,6 @@ export default function UseCases() {
             </div>
           ))}
         </div>
-
-        <p className="text-center text-navy-light max-w-2xl mx-auto">
-          EasyWIF is currently demo-led and best for teams that want faster scenario turns without enterprise overhead.
-        </p>
       </div>
     </section>
   )

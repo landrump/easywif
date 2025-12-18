@@ -55,17 +55,15 @@ export default function Hero() {
           </div>
 
           {/* Right Side - Visual */}
-          <div className="relative overflow-hidden rounded-lg shadow-xl" style={{ height: '500px' }}>
-            <div style={{ height: '100%', overflow: 'hidden' }}>
-              <Image
-                src="/EasyWIF_Hero.png"
-                alt="EasyWIF Dashboard Screenshot"
-                width={800}
-                height={600}
-                className="w-full h-full object-cover object-top"
-                priority
-              />
-            </div>
+          <div className="relative overflow-hidden rounded-lg shadow-xl">
+            <Image
+              src="/EasyWIF_Hero.png"
+              alt="EasyWIF Dashboard Screenshot"
+              width={800}
+              height={600}
+              className="rounded-lg shadow-xl w-full h-auto"
+              priority
+            />
           </div>
         </div>
       </div>
