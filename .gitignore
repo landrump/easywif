@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Streamlit
+.streamlit/secrets.toml
+.streamlit/config.toml
+
+# Data files (large)
+*.csv
+*.parquet
+*.xlsx
+*.xls
+
+# Logs
+debug.txt
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Next.js (for landing-page)
+landing-page/node_modules/
+landing-page/.next/
+landing-page/out/
+landing-page/.env*.local
+
+# Temporary files
+*.tmp
+*.bak
+
