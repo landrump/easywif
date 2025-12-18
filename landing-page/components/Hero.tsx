@@ -55,18 +55,17 @@ export default function Hero() {
           </div>
 
           {/* Right Side - Visual */}
-          <div className="relative">
-            <Image
-              src="/EasyWIF_Hero.png"
-              alt="EasyWIF Dashboard Screenshot"
-              width={800}
-              height={600}
-              className="rounded-lg shadow-xl w-full h-auto"
-              priority
-            />
-            <p className="text-sm text-gray-500 mt-3 text-center">
-              Real product screenshot (demo data shown)
-            </p>
+          <div className="relative overflow-hidden rounded-lg shadow-xl" style={{ height: '500px' }}>
+            <div style={{ height: '100%', overflow: 'hidden' }}>
+              <Image
+                src="/EasyWIF_Hero.png"
+                alt="EasyWIF Dashboard Screenshot"
+                width={800}
+                height={600}
+                className="w-full h-full object-cover object-top"
+                priority
+              />
+            </div>
           </div>
         </div>
       </div>

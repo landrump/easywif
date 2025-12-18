@@ -29,14 +29,16 @@ export default function HowItWorks() {
         </div>
 
         {/* Main Image */}
-        <div className="mb-12">
-          <Image
-            src="/EasyWIF_HowItWorks.jpg"
-            alt="How EasyWIF Works - 3 Step Process"
-            width={1200}
-            height={600}
-            className="rounded-lg shadow-lg w-full h-auto"
-          />
+        <div className="mb-12 overflow-hidden rounded-lg shadow-lg" style={{ height: '500px' }}>
+          <div style={{ height: '100%', overflow: 'hidden' }}>
+            <Image
+              src="/EasyWIF_HowItWorks.jpg"
+              alt="How EasyWIF Works - 3 Step Process"
+              width={1200}
+              height={600}
+              className="w-full h-full object-cover object-top"
+            />
+          </div>
         </div>
 
         {/* Step Cards */}

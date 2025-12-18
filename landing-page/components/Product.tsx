@@ -2,7 +2,7 @@ import Image from 'next/image'
 
 export default function Product() {
   return (
-    <section id="product" className="py-16 md:py-24 bg-gray-50 scroll-mt-16">
+    <section id="product" className="py-16 md:py-24 bg-gray-100 scroll-mt-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-16">
           <h2 className="text-3xl md:text-4xl font-bold text-navy mb-4">
@@ -92,13 +92,13 @@ export default function Product() {
         {/* Optional: Save & Export Callout */}
         <div className="bg-white rounded-lg p-8 shadow-md">
           <div className="grid md:grid-cols-2 gap-8 items-center">
-            <div>
+            <div className="overflow-hidden rounded-lg" style={{ height: '200px' }}>
               <Image
                 src="/EasyWIF_Save and Export.PNG"
                 alt="EasyWIF Save and Export Feature"
                 width={600}
-                height={400}
-                className="rounded-lg w-full h-auto"
+                height={200}
+                className="w-full h-full object-cover"
               />
             </div>
             <div className="space-y-3">

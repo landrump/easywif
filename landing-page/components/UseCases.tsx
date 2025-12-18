@@ -2,33 +2,33 @@ export default function UseCases() {
   const useCases = [
     {
       title: 'Post-production & media planning',
-      description: 'Model schedule shifts, resource reallocations, and budget scenarios for production timelines.',
-      bullets: ['Shift schedules', 'Scale teams', 'Export plan'],
+      description: 'Adjust production schedules and resource allocations when delivery dates or client needs change.',
+      bullets: ['Reschedule shoots', 'Reallocate editors', 'Update delivery timelines'],
     },
     {
       title: 'Consulting & delivery capacity planning',
-      description: 'Quickly adjust project assignments, model new engagements, and see capacity impact.',
-      bullets: ['Shift schedules', 'Scale teams', 'Export plan'],
+      description: 'Model new client engagements and reassign consultants without overloading teams.',
+      bullets: ['Add new projects', 'Balance consultant workload', 'Identify capacity gaps'],
     },
     {
       title: 'Construction project planning',
-      description: 'Plan timeline changes, resource adjustments, and cost scenarios across multiple projects.',
-      bullets: ['Shift schedules', 'Scale teams', 'Export plan'],
+      description: 'Adjust timelines and resources when weather, permits, or material delays impact schedules.',
+      bullets: ['Shift project phases', 'Reallocate crews', 'Update cost forecasts'],
     },
     {
       title: 'Operations & workforce planning',
-      description: 'Model staffing changes, shift adjustments, and capacity scenarios for operations teams.',
-      bullets: ['Shift schedules', 'Scale teams', 'Export plan'],
+      description: 'Model staffing changes for seasonal demand, shift coverage, or organizational restructuring.',
+      bullets: ['Adjust shift schedules', 'Scale up or down', 'Balance workload across teams'],
     },
     {
       title: 'Finance planning & budgeting support',
-      description: 'Run budget scenarios, model cost changes, and see financial impact before committing.',
-      bullets: ['Shift schedules', 'Scale teams', 'Export plan'],
+      description: 'Run budget scenarios when priorities shift or new initiatives require funding reallocation.',
+      bullets: ['Model cost changes', 'Compare budget options', 'See impact on forecasts'],
     },
     {
       title: 'Portfolio / roadmap scenario reviews',
-      description: 'Compare roadmap options, model priority shifts, and understand trade-offs quickly.',
-      bullets: ['Shift schedules', 'Scale teams', 'Export plan'],
+      description: 'Compare roadmap options when strategic priorities change or new opportunities arise.',
+      bullets: ['Prioritize initiatives', 'Model trade-offs', 'Align resources to strategy'],
     },
   ]
 
