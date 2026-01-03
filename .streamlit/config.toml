@@ -1,0 +1,22 @@
+[server]
+# Optimize server performance
+maxUploadSize = 200
+enableXsrfProtection = false
+enableCORS = false
+
+[browser]
+# Optimize browser performance
+gatherUsageStats = false
+
+[client]
+# Optimize client performance
+showErrorDetails = false
+
+[theme]
+# Use dark theme for consistency
+base = "dark"
+
+[runner]
+# Optimize runner performance
+magicEnabled = false
+
