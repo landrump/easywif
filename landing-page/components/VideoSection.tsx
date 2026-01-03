@@ -10,6 +10,10 @@ export default function VideoSection() {
     setIsPlaying(true)
   }
 
+  // YouTube video ID from https://youtu.be/rh4UtH3IVH8
+  const youtubeVideoId = 'rh4UtH3IVH8'
+  const youtubeEmbedUrl = `https://www.youtube.com/embed/${youtubeVideoId}?autoplay=1&rel=0`
+
   return (
     <section id="video-overview" className="py-16 md:py-24 bg-white scroll-mt-16">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -49,15 +53,13 @@ export default function VideoSection() {
               </div>
             </div>
           ) : (
-            <video
-              className="w-full h-full object-cover"
-              controls
-              autoPlay
-              playsInline
-            >
-              <source src="/EasyWIF Demo.mp4" type="video/mp4" />
-              Your browser does not support the video tag.
-            </video>
+            <iframe
+              src={youtubeEmbedUrl}
+              className="w-full h-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              title="EasyWIF Demo Video"
+            ></iframe>
           )}
         </div>
       </div>
