@@ -122,10 +122,8 @@ def debug_log(message: str):
 
 
 FILTER_COLUMNS_ORDER = [
-    "Forecast Status", "Category", "Account",
-    "Super Group", "Group", "Division",
-    "CCRU", "Cost Center", "Swimlane",
-    "Initiative", "Group Initiative", "Project",
+    "Resource_Type", "Resource_Name", "Department",
+    "Team", "Workstream", "Project", "Account_Code",
 ]
 DATE_COLUMNS = ["TI Date", "PO Date", "PRQ Date"]
 
@@ -171,12 +169,59 @@ def apply_shift_months(df: pd.DataFrame, row_mask: pd.Series, months: int, time_
     return df
 
 def shift_phase_dates(df: pd.DataFrame, row_mask: pd.Series, months: int) -> pd.DataFrame:
-    """Shift TI/PO/PRQ date columns by months if present."""
+    """Shift TI/PO/PRQ date columns and Start_Month/End_Month by months if present."""
     if months == 0:
         return df
+    # Shift standard date columns
     for c in ["TI Date", "PO Date", "PRQ Date"]:
         if c in df.columns:
             df.loc[row_mask, c] = pd.to_datetime(df.loc[row_mask, c], errors="coerce") + pd.DateOffset(months=months)
+    
+    # Shift Start_Month and End_Month columns (MM/YYYY format)
+    def shift_month_string(month_str, months_offset):
+        """Shift a MM/YYYY or YYYY-MM string by months_offset months. Handles extended periods where months 13-24 represent next year."""
+        if pd.isna(month_str):
+            return month_str
+        month_str = str(month_str).strip()
+        try:
+            # Try MM/YYYY format first
+            if '/' in month_str:
+                parts = month_str.split('/')
+                if len(parts) == 2:
+                    month, year = int(parts[0]), int(parts[1])
+                    # Handle extended periods: months 13-24 = months 1-12 of following year
+                    if month > 12:
+                        year += (month - 1) // 12
+                        month = ((month - 1) % 12) + 1
+                    dt = pd.Timestamp(year=year, month=month, day=1)
+                    shifted = dt + pd.DateOffset(months=months_offset)
+                    return f"{shifted.month:02d}/{shifted.year}"
+            # Try YYYY-MM format (including extended months like 2026-24)
+            elif '-' in month_str:
+                parts = month_str.split('-')
+                if len(parts) == 2:
+                    year, month = int(parts[0]), int(parts[1])
+                    # Handle extended periods: months 13-24 = months 1-12 of following year
+                    if month > 12:
+                        year += (month - 1) // 12
+                        month = ((month - 1) % 12) + 1
+                    dt = pd.Timestamp(year=year, month=month, day=1)
+                    shifted = dt + pd.DateOffset(months=months_offset)
+                    return f"{shifted.year}-{shifted.month:02d}"
+        except:
+            pass
+        return month_str
+    
+    # Apply shift to Start_Month and End_Month
+    for c in ["Start_Month", "End_Month"]:
+        if c in df.columns and row_mask.any():
+            # Get the values for the masked rows
+            masked_values = df.loc[row_mask, c].copy()
+            # Apply the shift function
+            shifted_values = masked_values.apply(lambda x: shift_month_string(x, months))
+            # Assign back to the dataframe
+            df.loc[row_mask, c] = shifted_values
+    
     return df
 
 def _file_sig(path: str) -> str:
@@ -197,12 +242,44 @@ def _filehash_from_bytes(b: bytes) -> str:
     return h.hexdigest()
 
 def _is_yyyymm(s: str) -> bool:
-    """Return True if s looks like YYYYMM (e.g., '202501')."""
+    """Return True if s looks like YYYYMM (e.g., '202501') or YYYY-MM (e.g., '2026-01')."""
     s = str(s).strip()
-    return len(s) == 6 and s.isdigit()
+    # Check for YYYYMM format (6 digits)
+    if len(s) == 6 and s.isdigit():
+        return True
+    # Check for YYYY-MM format (e.g., '2026-01')
+    if len(s) == 7 and s.count('-') == 1:
+        parts = s.split('-')
+        if len(parts) == 2 and parts[0].isdigit() and len(parts[0]) == 4 and parts[1].isdigit() and len(parts[1]) == 2:
+            return True
+    return False
 
 def yyyymm_to_dt(mm: str) -> pd.Timestamp:
-    return pd.to_datetime(f"{mm}01", format="%Y%m%d", errors="coerce")
+    """Convert YYYYMM or YYYY-MM format to datetime. Handles extended periods where months 13-24 represent next year."""
+    mm = str(mm).strip()
+    try:
+        # Handle YYYY-MM format
+        if '-' in mm:
+            parts = mm.split('-')
+            if len(parts) == 2:
+                year, month = int(parts[0]), int(parts[1])
+                # Handle extended periods: months 13-24 = months 1-12 of following year
+                if month > 12:
+                    year += (month - 1) // 12
+                    month = ((month - 1) % 12) + 1
+                return pd.to_datetime(f"{year}-{month:02d}-01", format="%Y-%m-%d", errors="coerce")
+        # Handle YYYYMM format
+        else:
+            if len(mm) == 6 and mm.isdigit():
+                year, month = int(mm[:4]), int(mm[4:])
+                # Handle extended periods: months 13-24 = months 1-12 of following year
+                if month > 12:
+                    year += (month - 1) // 12
+                    month = ((month - 1) % 12) + 1
+                return pd.to_datetime(f"{year}{month:02d}01", format="%Y%m%d", errors="coerce")
+    except:
+        pass
+    return pd.NaT
 
 def total_series(df_: pd.DataFrame, tcols: List[str]) -> pd.Series:
     """Monthly totals in raw units; filters to spending rows (non-headcount)."""
@@ -274,7 +351,7 @@ def build_accelerators(df: pd.DataFrame,
                        cache_key: str) -> dict:
     time_cols = [c for c in df.columns if _is_yyyymm(c)]
     months = pd.Series(
-        [pd.to_datetime(f"{c}01", format="%Y%m%d", errors="coerce") for c in time_cols],
+        [yyyymm_to_dt(c) for c in time_cols],
         dtype="datetime64[ns]"
     )
     valid = months.notna().to_numpy()
@@ -601,7 +678,21 @@ def create_excel_style_pivot_table(df: pd.DataFrame, time_cols: List[str], metri
 # Data bootstrap (order matters!) - with performance optimization
 # ============================================================
 if "data_name" not in st.session_state:
-    st.session_state["data_name"] = "Demo Data.csv"
+    # Always default to "Demo Data_Post Production (Small - 50 lines, 12 months).csv"
+    default_file = "Demo Data_Post Production (Small - 50 lines, 12 months).csv"
+    # Check if the file exists, if not, try to find it or use it anyway (will error if truly missing)
+    if os.path.exists(default_file):
+        st.session_state["data_name"] = default_file
+    else:
+        # Fallback: try to find any Post Production file
+        demo_files = [f for f in os.listdir(".") if f.startswith("Demo Data") and f.endswith(".csv")]
+        post_prod_files = [f for f in demo_files if "Post Production" in f and "12 months" in f]
+        if post_prod_files:
+            st.session_state["data_name"] = sorted(post_prod_files)[0]
+        elif demo_files:
+            st.session_state["data_name"] = sorted(demo_files)[0]
+        else:
+            st.session_state["data_name"] = default_file
 
 if "df_raw" not in st.session_state:
     with st.spinner("Loading data..."):
@@ -628,7 +719,7 @@ df_raw[time_cols] = df_raw[time_cols].apply(pd.to_numeric, errors="coerce").fill
 axis_max = float(df_raw[time_cols].sum(axis=0).max() or 1.0)
 
 # 5-year subset lists (only used for some summaries)
-months_dt_all = pd.to_datetime([f"{c}01" for c in time_cols], format="%Y%m%d", errors="coerce")
+months_dt_all = pd.Series([yyyymm_to_dt(c) for c in time_cols])
 valid_idx = months_dt_all.notna()
 months_dt_all = months_dt_all[valid_idx]
 time_cols_valid = [c for c, ok in zip(time_cols, valid_idx) if ok]
@@ -659,8 +750,8 @@ COLOR_NEW_GSD        = COLOR_NEW
 st.markdown(
         """
         <style>
-          .block-container { padding-top: 0.6rem; }
-          .tight-title { font-size: 1.00rem; font-weight: 700; margin: 0.15rem 0 0.25rem 0; }
+          .block-container { padding-top: 2rem; }
+          .tight-title { font-size: 1.125rem; font-weight: 700; margin: 0.15rem 0 0.25rem 0; }
           .subtitle { font-size: 1.5rem; color: #cfd8e3; line-height: 1.15; margin: 0.1rem 0 0 0; }
           .directions { font-size: 1.1rem; color: #cfd8e3; margin: 0.25rem 0 0.6rem 0; }
           .demo-mode { color:#FFD600; font-weight:800; font-size:12pt; }
@@ -841,9 +932,18 @@ st.markdown(
 # ============================================================
 # Header (title + directions)
 # ============================================================
-st.markdown("<h1>EasyWIF - Roadmap & Forecast Planning</h1>", unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Quick What-If Exploration Tool</div>', unsafe_allow_html=True)
-st.markdown('<div class="directions">Directions: Filter your data, make a change, click apply. Repeat as needed.</div>', unsafe_allow_html=True)
+# Logo and title inline
+st.markdown("<div style='margin-top: 1rem;'></div>", unsafe_allow_html=True)
+logo_col, title_col = st.columns([0.2, 0.8])
+with logo_col:
+    logo_path = "ezw logo_white.png"
+    if Path(logo_path).exists():
+        st.image(logo_path, width=180)
+    else:
+        st.write("")  # Empty space if logo not found
+with title_col:
+    st.markdown("<h1 style='margin-top: 0.5rem; padding-top: 0;'>EasyWIF - Roadmap & Forecast Planning</h1>", unsafe_allow_html=True)
+    st.markdown('<div class="directions">Directions: Filter Data --> Make a Change --> Review Impact</div>', unsafe_allow_html=True)
 
 # ============================================================
 # Pending actions (before widgets)
@@ -852,14 +952,25 @@ if st.session_state.get("pending_clear", False):
     for col in FILTER_COLUMNS_ORDER:
         st.session_state.pop(f"f_{col}", None)
     st.session_state["changes"] = []
-    st.session_state["df_raw"] = smart_load_any("Demo Data.csv")
-    st.session_state["data_name"] = "Demo Data.csv"
+    # Always default to "Demo Data_Post Production (Small - 50 lines, 12 months).csv"
+    default_file = "Demo Data_Post Production (Small - 50 lines, 12 months).csv"
+    # Check if file exists, if not try to find a similar one
+    if not os.path.exists(default_file):
+        demo_files = [f for f in os.listdir(".") if f.startswith("Demo Data") and f.endswith(".csv")]
+        post_prod_12m = [f for f in demo_files if "Post Production" in f and "12 months" in f]
+        if post_prod_12m:
+            default_file = sorted(post_prod_12m)[0]
+        elif demo_files:
+            default_file = sorted(demo_files)[0]
+    
+    st.session_state["df_raw"] = smart_load_any(default_file)
+    st.session_state["data_name"] = default_file
     st.session_state["pending_clear"] = False
     st.rerun()
 
 if st.session_state.get("pending_reset_filters", False):
     for col in FILTER_COLUMNS_ORDER:
-        st.session_state.pop(f"f_{col}", None)
+        st.session_state[f"f_{col}"] = []
     st.session_state["pending_reset_filters"] = False
     st.rerun()
 
@@ -1046,39 +1157,67 @@ with st.sidebar:
     st.markdown("### Data")
     src_changed = False
 
-    # If we already uploaded once, allow quick toggle between it and Demo
+    # Find all Demo Data files in the current directory
+    demo_data_files = []
+    try:
+        for file in os.listdir("."):
+            if file.startswith("Demo Data") and file.endswith(".csv"):
+                demo_data_files.append(file)
+        demo_data_files.sort()  # Sort alphabetically
+    except Exception:
+        # Fallback if directory listing fails
+        demo_data_files = ["Demo Data_Post Production (Small - 50 lines, 12 months).csv"]
+    
+    # Always default to "Demo Data_Post Production (Small - 50 lines, 12 months).csv"
+    default_demo_file = "Demo Data_Post Production (Small - 50 lines, 12 months).csv"
+    # If the default file is not in the list, use it anyway (or find the closest match)
+    if default_demo_file not in demo_data_files:
+        # Try to find a Post Production file with "12 months" in the name
+        post_prod_12m = [f for f in demo_data_files if "Post Production" in f and "12 months" in f]
+        if post_prod_12m:
+            default_demo_file = sorted(post_prod_12m)[0]
+        elif demo_data_files:
+            default_demo_file = demo_data_files[0]
+    
+    # Get current data name
+    current_data_name = st.session_state.get("data_name", default_demo_file)
+    
+    # Check if current data is a demo data file
+    is_demo_data = current_data_name in demo_data_files
     has_last = "last_upload_df" in st.session_state and st.session_state["last_upload_df"] is not None
-    data_choice = st.radio(
-        "Data source",
-        ["Demo Data"] + (["Last Upload"] if has_last else []),
-        index=0 if st.session_state.get("data_name","Demo Data.csv") == "Demo Data.csv" else 1,
-        horizontal=True,
-    )
-
-    # If the radio was switched, swap df_raw and rebuild accelerators
-    if data_choice == "Demo Data" and st.session_state.get("data_name") != "Demo Data.csv":
-        with st.status("Switching to Demo Data…", expanded=False):
-            st.session_state["df_raw"] = smart_load_any("Demo Data.csv")
-            st.session_state["data_name"] = "Demo Data.csv"
+    is_last_upload = has_last and current_data_name == st.session_state.get("last_upload_name", "")
+    
+    # Create dropdown for demo data files
+    if demo_data_files:
+        # Determine the index for the selectbox
+        if current_data_name in demo_data_files:
+            default_index = demo_data_files.index(current_data_name)
+        else:
+            default_index = demo_data_files.index(default_demo_file) if default_demo_file in demo_data_files else 0
+        
+        selected_demo = st.selectbox(
+            "Select Demo Data",
+            options=demo_data_files,
+            index=default_index,
+            key="demo_data_selector"
+        )
+        
+        # If a different demo file was selected, load it
+        if selected_demo != current_data_name:
+            with st.status(f"Loading {selected_demo}…", expanded=False):
+                st.session_state["df_raw"] = smart_load_any(selected_demo)
+                st.session_state["data_name"] = selected_demo
             st.session_state["changes"] = []
-            key = _file_sig("Demo Data.csv")
+            key = _file_sig(selected_demo)
             st.session_state["accel"] = build_accelerators(st.session_state["df_raw"], FILTER_COLUMNS_ORDER, key)
-        src_changed = True
-
-    elif data_choice == "Last Upload" and has_last and st.session_state.get("data_name") == "Demo Data.csv":
-        with st.status("Switching to Last Upload…", expanded=False):
-            st.session_state["df_raw"] = st.session_state["last_upload_df"].copy()
-            st.session_state["data_name"] = st.session_state.get("last_upload_name","Uploaded.csv")
-            st.session_state["changes"] = []
-            key = _filehash_from_bytes(st.session_state.get("last_upload_bytes", b""))
-            st.session_state["accel"] = build_accelerators(st.session_state["df_raw"], FILTER_COLUMNS_ORDER, key)
-        src_changed = True
+            src_changed = True
 
     if src_changed:
         st.rerun()
 
     # Memory-only uploader (no temp files), with user-visible status
-    up = st.file_uploader("Load CSV (replaces current)", type=["csv"], accept_multiple_files=False, disabled=True)
+    st.markdown("**Or upload your own data:**")
+    up = st.file_uploader("Browse and upload CSV file", type=["csv"], accept_multiple_files=False, disabled=False)
     if up is not None:
         with st.status(f"Loading {up.name}…", expanded=True) as s:
             s.write("Reading file bytes…")
@@ -1117,16 +1256,16 @@ with st.sidebar:
             s.update(label="Loaded ✔", state="complete")
         st.rerun()
 
-    # Reset filters button
-    if st.button("Reset Filters", use_container_width=True):
-        for col in FILTER_COLUMNS_ORDER:
-            st.session_state.pop(f"f_{col}", None)
-        st.session_state["pending_reset_filters"] = True
-        st.rerun()
-
     st.markdown("---")  # divider above the filters
     
     st.subheader("Filters")
+    
+    # Reset filters button at top of filters
+    if st.button("Reset Filters", use_container_width=True):
+        for col in FILTER_COLUMNS_ORDER:
+            st.session_state[f"f_{col}"] = []
+        st.session_state["pending_reset_filters"] = True
+        st.rerun()
 
     # ---------- Dynamic Hierarchical Filters ----------
     selected = {}
@@ -1140,6 +1279,17 @@ with st.sidebar:
     # Get dynamic options based on current selections
     dynamic_options = get_dynamic_filter_options(df_raw, FILTER_COLUMNS_ORDER, current_selections)
     
+    # Map column names to display names
+    display_names = {
+        "Resource_Type": "Resource Type",
+        "Resource_Name": "Resource Name",
+        "Department": "Department",
+        "Team": "Team",
+        "Project": "Project",
+        "Workstream": "Workstream",
+        "Account_Code": "Account"
+    }
+    
     for col in FILTER_COLUMNS_ORDER:
         if col in df_raw.columns:
             opts = dynamic_options.get(col, [])
@@ -1148,7 +1298,16 @@ with st.sidebar:
             # Filter out any default values that are no longer available
             valid_defaults = [v for v in default if v in opts]
             
-            selected_vals = st.multiselect(col, options=opts, default=valid_defaults, key=f"f_{col}")
+            # Use display name for the label
+            display_name = display_names.get(col, col)
+            # Only pass default if the key doesn't exist in session state to avoid the error
+            widget_key = f"f_{col}"
+            if widget_key in st.session_state:
+                # Key exists, don't pass default parameter
+                selected_vals = st.multiselect(display_name, options=opts, key=widget_key)
+            else:
+                # Key doesn't exist, use default
+                selected_vals = st.multiselect(display_name, options=opts, default=valid_defaults, key=widget_key)
             selected[col] = selected_vals
 
     # Scope based on filters
@@ -1168,8 +1327,10 @@ with st.sidebar:
           <ul style="margin-top:0; margin-bottom:0.6rem; padding-left: 1.1rem;">
             <li><b>Shift</b>: moves the full curve for the filtered areas</li>
             <li><b>Scale</b>: increases or decreases filtered areas between the given start and end</li>
-            <li><b>Extend/Shorten</b>: adds filtered area to the right, or removes area</li>
+            <li><b>Extend</b>: copies selected date range and adds it at a chosen start location</li>
+            <li><b>Remove</b>: removes data from selected date range</li>
             <li><b>Add Project</b>: copies an existing project and starts its curve at your chosen month</li>
+            <li><b>Add Team</b>: copies an existing team and starts its curve at your chosen month</li>
           </ul>
         </div>
         """,
@@ -1183,8 +1344,10 @@ with st.sidebar:
             "shift_months",
             "scale_mode", "pct_val", "scale_abs",
             "start_mm_sel", "end_mm_sel",
-            "es_mode", "es_start", "es_end",
+            "es_mode", "es_start", "es_end", "es_copy_start", "es_copy_end", "es_paste_start",
+            "es_start_idx", "es_end_idx", "es_copy_start_idx", "es_copy_end_idx", "es_paste_start_idx",
             "addproj_name", "addproj_start",
+            "addteam_name", "addteam_start",
         ]:
             st.session_state.pop(k, None)
 
@@ -1198,16 +1361,34 @@ with st.sidebar:
     # ---- Exactly one change type must be selected ----
     change_pick = st.radio(
         "Select one change to apply:",
-        ["(none)", "Shift", "Scale", "Extend/Shorten", "Add Project"],
+        ["Shift", "Scale", "Extend", "Remove", "Add Project", "Add Team"],
         horizontal=False,
         key="change_pick",
-        index=0,
+        index=None,
     )
 
     # Small util for month formatting
     def _fmt_mm(mm: str) -> str:
         try:
-            return pd.to_datetime(mm + "01", format="%Y%m%d").strftime("%m/%Y")
+            # Handle YYYY-MM format (including extended months like 2026-24)
+            if '-' in mm:
+                parts = mm.split('-')
+                if len(parts) == 2:
+                    year, month = int(parts[0]), int(parts[1])
+                    # Handle extended periods: months 13-24 = months 1-12 of following year
+                    if month > 12:
+                        year += (month - 1) // 12
+                        month = ((month - 1) % 12) + 1
+                    return pd.to_datetime(f"{year}-{month:02d}-01", format="%Y-%m-%d").strftime("%m/%Y")
+            # Handle YYYYMM format
+            else:
+                if len(mm) == 6 and mm.isdigit():
+                    year, month = int(mm[:4]), int(mm[4:])
+                    # Handle extended periods: months 13-24 = months 1-12 of following year
+                    if month > 12:
+                        year += (month - 1) // 12
+                        month = ((month - 1) % 12) + 1
+                    return pd.to_datetime(f"{year}{month:02d}01", format="%Y%m%d").strftime("%m/%Y")
         except Exception:
             return mm
     
@@ -1317,36 +1498,75 @@ with st.sidebar:
         if start_mm == end_mm:
             st.info("ℹ️ Start and end dates are the same. This will affect only one month.")
 
-    # EXTEND/SHORTEN
-    elif change_pick == "Extend/Shorten":
-        try:
-            es_mode  = st.segmented_control("Mode", options=["Extend", "Shorten"], key="es_mode")
-        except Exception:
-            es_mode  = st.radio("Mode", options=["Extend", "Shorten"], horizontal=True, key="es_mode")
-        
-        # Debug: Print what the UI is setting
-        debug_log(f"🔍 Debug: UI es_mode = '{es_mode}' (type: {type(es_mode)})")
-        
+    # EXTEND
+    elif change_pick == "Extend":
         # Get dynamic time options based on current filter selections
         dynamic_time_cols = get_dynamic_time_options(df_raw, selected, time_cols)
         if not dynamic_time_cols:
             dynamic_time_cols = time_cols  # fallback to all time columns
         
-        # Use the new time range selector instead of dropdowns
+        st.markdown("**Select date range to copy:**")
+        es_copy_start, es_copy_end = create_time_range_selector(
+            dynamic_time_cols, 
+            "es_copy_start", 
+            "es_copy_end", 
+            "Copy Range"
+        )
+        # Store indices for later use
+        if es_copy_start in dynamic_time_cols:
+            st.session_state["es_copy_start_idx"] = dynamic_time_cols.index(es_copy_start)
+        if es_copy_end in dynamic_time_cols:
+            st.session_state["es_copy_end_idx"] = dynamic_time_cols.index(es_copy_end)
+        
+        st.markdown("**Select where to paste (start date):**")
+        # Get index for paste start (should be after copy end)
+        copy_end_idx = dynamic_time_cols.index(es_copy_end) if es_copy_end in dynamic_time_cols else len(dynamic_time_cols) - 1
+        # Ensure paste start is after copy end, but within valid bounds
+        min_paste_idx = min(copy_end_idx + 1, len(dynamic_time_cols) - 1)
+        saved_paste_idx = st.session_state.get("es_paste_start_idx", min_paste_idx)
+        # Ensure the index is within valid bounds
+        paste_start_idx = max(min_paste_idx, min(saved_paste_idx, len(dynamic_time_cols) - 1))
+        # Final safety check: ensure index is valid
+        paste_start_idx = max(0, min(paste_start_idx, len(dynamic_time_cols) - 1))
+        es_paste_start = st.selectbox(
+            "Paste Start Date",
+            options=dynamic_time_cols,
+            index=paste_start_idx,
+            key="es_paste_start",
+            format_func=_fmt_mm
+        )
+        st.session_state["es_paste_start_idx"] = dynamic_time_cols.index(es_paste_start)
+        
+        # Store for later use
+        st.session_state["es_mode"] = "Extend"
+        st.session_state["es_start"] = es_copy_start
+        st.session_state["es_end"] = es_copy_end
+        
+        # Validation
+        if es_copy_start == es_copy_end:
+            st.info("ℹ️ Copy start and end dates are the same. This will copy only one month.")
+    
+    # REMOVE
+    elif change_pick == "Remove":
+        # Get dynamic time options based on current filter selections
+        dynamic_time_cols = get_dynamic_time_options(df_raw, selected, time_cols)
+        if not dynamic_time_cols:
+            dynamic_time_cols = time_cols  # fallback to all time columns
+        
+        st.markdown("**Select date range to remove:**")
         es_start, es_end = create_time_range_selector(
             dynamic_time_cols, 
             "es_start", 
             "es_end", 
-            "Extend/Shorten Window"
+            "Remove Range"
         )
         
-        # Validation: Check if mode is selected
-        if not es_mode or es_mode not in ["Extend", "Shorten"]:
-            st.warning("⚠️ Please select either 'Extend' or 'Shorten' mode.")
+        # Store for later use
+        st.session_state["es_mode"] = "Remove"
         
-        # Validation: Check if time range is valid
+        # Validation
         if es_start == es_end:
-            st.info("ℹ️ Start and end dates are the same. This will affect only one month.")
+            st.info("ℹ️ Start and end dates are the same. This will remove only one month.")
 
     # ADD PROJECT
     elif change_pick == "Add Project":
@@ -1359,6 +1579,18 @@ with st.sidebar:
             dynamic_time_cols = time_cols  # fallback to all time columns
         
         add_proj_start = st.selectbox("Start Month", options=dynamic_time_cols, index=0, key="addproj_start", format_func=_fmt_mm)
+
+    # ADD TEAM
+    elif change_pick == "Add Team":
+        team_opts = sorted(df_raw["Team"].dropna().astype(str).unique().tolist()) if "Team" in df_raw.columns else []
+        add_team_name = st.selectbox("Team to copy", options=team_opts, index=0 if team_opts else None, key="addteam_name")
+        
+        # Get dynamic time options based on current filter selections
+        dynamic_time_cols = get_dynamic_time_options(df_raw, selected, time_cols)
+        if not dynamic_time_cols:
+            dynamic_time_cols = time_cols  # fallback to all time columns
+        
+        add_team_start = st.selectbox("Start Month", options=dynamic_time_cols, index=0, key="addteam_start", format_func=_fmt_mm)
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
@@ -1382,10 +1614,12 @@ class Change:
     es_mode: str = "None"
     es_start: str = ""
     es_end: str = ""
-    # for Add Project
+    # for Add Project and Add Team
     kind: str = "normal"
     addproj_name: str = ""
     addproj_start: str = ""
+    addteam_name: str = ""
+    addteam_start: str = ""
 
 def month_slice_indices(time_cols_local: List[str], start_mm_local: str, end_mm_local: str) -> Tuple[int, int]:
     s = time_cols_local.index(start_mm_local)
@@ -1427,13 +1661,17 @@ def apply_scale(df: pd.DataFrame, row_mask: pd.Series, time_cols_local: List[str
     df.loc[row_mask, cols] = block
 
 def apply_extend(df: pd.DataFrame, row_mask: pd.Series, time_cols_local: List[str],
-                 win_start: str, win_end: str) -> None:
+                 win_start: str, win_end: str, paste_start: str = None) -> None:
     if row_mask.sum() == 0: return
     s_idx, e_idx = month_slice_indices(time_cols_local, win_start, win_end)
     width = e_idx - s_idx + 1
     if width <= 0: return
     src_cols = time_cols_local[s_idx:e_idx+1]
-    dst_start = e_idx + 1
+    # Use paste_start if provided, otherwise default to after win_end
+    if paste_start and paste_start in time_cols_local:
+        dst_start = time_cols_local.index(paste_start)
+    else:
+        dst_start = e_idx + 1
     dst_end = min(dst_start + width - 1, len(time_cols_local)-1)
     if dst_start >= len(time_cols_local): return
     dst_cols = time_cols_local[dst_start:dst_end+1]
@@ -1525,6 +1763,82 @@ def apply_shorten(df: pd.DataFrame, row_mask: pd.Series, time_cols_local: List[s
                         else:
                             # PO is in or after shortened period, move to end of shortened period
                             df.loc[idx, date_col] = win_end_dt + pd.DateOffset(months=1)
+    
+    # Adjust Start_Month and End_Month for shortened data
+    if "Start_Month" in df.columns:
+        for idx in df[row_mask].index:
+            start_mm = df.loc[idx, "Start_Month"]
+            if pd.notna(start_mm):
+                start_dt = yyyymm_to_dt(str(start_mm).strip())
+                if pd.notna(start_dt):
+                    win_start_dt = yyyymm_to_dt(win_start)
+                    win_end_dt = yyyymm_to_dt(win_end)
+                    # If start is in the removed range, move it to before the removed range
+                    if win_start_dt <= start_dt <= win_end_dt:
+                        # Move to month before removed range
+                        new_start_dt = win_start_dt - pd.DateOffset(months=1)
+                        df.loc[idx, "Start_Month"] = new_start_dt.strftime("%Y-%m")
+                    elif start_dt > win_end_dt:
+                        # If start is after removed range, shift it back by the removed duration
+                        months_removed = (win_end_dt.year - win_start_dt.year) * 12 + (win_end_dt.month - win_start_dt.month) + 1
+                        new_start_dt = start_dt - pd.DateOffset(months=months_removed)
+                        df.loc[idx, "Start_Month"] = new_start_dt.strftime("%Y-%m")
+    
+    if "End_Month" in df.columns:
+        for idx in df[row_mask].index:
+            end_mm = df.loc[idx, "End_Month"]
+            if pd.notna(end_mm):
+                end_dt = yyyymm_to_dt(str(end_mm).strip())
+                if pd.notna(end_dt):
+                    win_start_dt = yyyymm_to_dt(win_start)
+                    win_end_dt = yyyymm_to_dt(win_end)
+                    # If end is in the removed range, move it to before the removed range
+                    if win_start_dt <= end_dt <= win_end_dt:
+                        # Move to month before removed range
+                        new_end_dt = win_start_dt - pd.DateOffset(months=1)
+                        df.loc[idx, "End_Month"] = new_end_dt.strftime("%Y-%m")
+                    elif end_dt > win_end_dt:
+                        # If end is after removed range, shift it back by the removed duration
+                        months_removed = (win_end_dt.year - win_start_dt.year) * 12 + (win_end_dt.month - win_start_dt.month) + 1
+                        new_end_dt = end_dt - pd.DateOffset(months=months_removed)
+                        df.loc[idx, "End_Month"] = new_end_dt.strftime("%Y-%m")
+                    elif end_dt < win_start_dt:
+                        # If end is before removed range, keep as is
+                        pass
+
+def recalculate_project_dates_from_data(df: pd.DataFrame, time_cols: List[str]) -> None:
+    """
+    Recalculate Start_Month and End_Month for each row based on where actual non-zero data starts and ends.
+    This is useful after removing data without filters, as it ensures project dates reflect the actual data range.
+    """
+    if "Start_Month" not in df.columns or "End_Month" not in df.columns:
+        return
+    
+    # Convert time columns to numeric
+    time_data = df[time_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    
+    for idx in df.index:
+        row_data = time_data.loc[idx]
+        
+        # Find first and last non-zero months
+        non_zero_mask = row_data > 0.0001  # Use small threshold to account for floating point
+        non_zero_indices = row_data.index[non_zero_mask].tolist()
+        
+        if non_zero_indices:
+            # Get the first and last time columns with data
+            first_month = non_zero_indices[0]
+            last_month = non_zero_indices[-1]
+            
+            # Convert to datetime and format as YYYY-MM
+            try:
+                first_dt = yyyymm_to_dt(first_month)
+                last_dt = yyyymm_to_dt(last_month)
+                if pd.notna(first_dt):
+                    df.loc[idx, "Start_Month"] = first_dt.strftime("%Y-%m")
+                if pd.notna(last_dt):
+                    df.loc[idx, "End_Month"] = last_dt.strftime("%Y-%m")
+            except:
+                pass
 
 def apply_add_project(df_base: pd.DataFrame, df_work: pd.DataFrame,
                       project_name: str, start_mm: str, time_cols_local: List[str]) -> pd.DataFrame:
@@ -1545,6 +1859,62 @@ def apply_add_project(df_base: pd.DataFrame, df_work: pd.DataFrame,
     debug_log(f"🔍 Debug: Project time values sum: {vals.sum():,.0f}")
     if vals.sum() == 0.0:
         debug_log(f"🔍 Debug: Project has no time values, returning unchanged")
+        return df_work
+    col_nonzero = (vals.sum(axis=0) > 0.0)
+    debug_log(f"🔍 Debug: Non-zero columns: {col_nonzero.sum()} out of {len(col_nonzero)}")
+    try:
+        src_first_idx = list(col_nonzero).index(True)
+        debug_log(f"🔍 Debug: First non-zero column index: {src_first_idx}")
+    except ValueError:
+        debug_log(f"🔍 Debug: No non-zero columns found")
+        return df_work
+
+    tgt_idx = time_cols_local.index(start_mm)
+    shift = tgt_idx - src_first_idx
+    debug_log(f"🔍 Debug: Target index: {tgt_idx}, shift: {shift} months")
+
+    shifted = np.zeros_like(vals)
+    n = vals.shape[1]
+    if shift > 0:
+        shifted[:, shift:n] = vals[:, 0:n-shift]
+        debug_log(f"🔍 Debug: Shifting right by {shift} months")
+    elif shift < 0:
+        k = -shift
+        shifted[:, 0:n-k] = vals[:, k:n]
+        debug_log(f"🔍 Debug: Shifting left by {k} months")
+    else:
+        shifted = vals.copy()
+        debug_log(f"🔍 Debug: No shift needed")
+    src[time_cols_local] = shifted
+
+    for c in DATE_COLUMNS:
+        if c in src.columns:
+            src[c] = pd.to_datetime(src[c], errors="coerce") + pd.DateOffset(months=shift)
+
+    debug_log(f"🔍 Debug: Concatenating {len(src)} rows to existing {len(df_work)} rows")
+    result = pd.concat([df_work, src], ignore_index=True)
+    debug_log(f"🔍 Debug: Final result shape: {result.shape}")
+    return result
+
+def apply_add_team(df_base: pd.DataFrame, df_work: pd.DataFrame,
+                   team_name: str, start_mm: str, time_cols_local: List[str]) -> pd.DataFrame:
+    debug_log(f"🔍 Debug: apply_add_team called with team: {team_name}, start: {start_mm}")
+    debug_log(f"🔍 Debug: df_base has Team column: {'Team' in df_base.columns}")
+    debug_log(f"🔍 Debug: df_base Team values: {df_base['Team'].astype(str).unique()[:5].tolist() if 'Team' in df_base.columns else 'N/A'}")
+    
+    if "Team" not in df_base.columns or not team_name:
+        debug_log(f"🔍 Debug: Missing Team column or team name")
+        return df_work
+    src = df_base[df_base["Team"].astype(str) == team_name].copy()
+    debug_log(f"🔍 Debug: Found {len(src)} rows for team '{team_name}'")
+    if src.empty:
+        debug_log(f"🔍 Debug: No rows found for team '{team_name}'")
+        return df_work
+
+    vals = src[time_cols_local].apply(pd.to_numeric, errors="coerce").fillna(0.0).to_numpy(dtype="float32")
+    debug_log(f"🔍 Debug: Team time values sum: {vals.sum():,.0f}")
+    if vals.sum() == 0.0:
+        debug_log(f"🔍 Debug: Team has no time values, returning unchanged")
         return df_work
     col_nonzero = (vals.sum(axis=0) > 0.0)
     debug_log(f"🔍 Debug: Non-zero columns: {col_nonzero.sum()} out of {len(col_nonzero)}")
@@ -1680,16 +2050,37 @@ def describe_change(ch: Change) -> str:
     
     # Format impact amount
     impact_text = ""
-    if impact_amount > 0:
-        if impact_amount >= 1_000_000:
-            impact_text = f" (${impact_amount/1_000_000:.1f}M affected, {rows_affected} rows)"
+    if impact_amount != 0:
+        abs_amount = abs(impact_amount)
+        if abs_amount >= 1_000_000:
+            impact_text = f" (${abs_amount/1_000_000:.1f}M impacted, {rows_affected} rows)"
         else:
-            impact_text = f" (${impact_amount:,.0f} affected, {rows_affected} rows)"
+            impact_text = f" (${abs_amount:,.0f} impacted, {rows_affected} rows)"
     
     # Handle different change types with specific details
     if getattr(ch, "kind", "normal") == "add_project":
-        start_date = pd.to_datetime(ch.addproj_start + "01", format="%Y%m%d").strftime("%b %Y")
+        # Handle both YYYYMM and YYYY-MM formats
+        start_mm = str(ch.addproj_start).strip()
+        try:
+            if '-' in start_mm:
+                start_date = pd.to_datetime(f"{start_mm}-01", format="%Y-%m-%d").strftime("%b %Y")
+            else:
+                start_date = pd.to_datetime(start_mm + "01", format="%Y%m%d").strftime("%b %Y")
+        except:
+            start_date = start_mm
         return f"Added project '{ch.addproj_name}' starting {start_date}"
+    
+    if getattr(ch, "kind", "normal") == "add_team":
+        # Handle both YYYYMM and YYYY-MM formats
+        start_mm = str(ch.addteam_start).strip()
+        try:
+            if '-' in start_mm:
+                start_date = pd.to_datetime(f"{start_mm}-01", format="%Y-%m-%d").strftime("%b %Y")
+            else:
+                start_date = pd.to_datetime(start_mm + "01", format="%Y%m%d").strftime("%b %Y")
+        except:
+            start_date = start_mm
+        return f"Added team '{ch.addteam_name}' starting {start_date}"
     
     # Build detailed description based on change type
     if ch.shift_months:
@@ -1707,12 +2098,14 @@ def describe_change(ch: Change) -> str:
         amount_text = f"${ch.scale_abs:,.0f}" if ch.scale_abs != 0 else "$0"
         return f"Scaled {scope_txt} by {amount_text} between {date_range}{impact_text}"
     
-    elif ch.es_mode in ("Extend", "Shorten"):
+    elif ch.es_mode in ("Extend", "Remove"):
         date_range = format_date_range(ch.es_start or ch.start_mm, ch.es_end or ch.end_mm)
         if ch.es_mode == "Extend":
-            return f"Extended {scope_txt} by copying {date_range} forward{impact_text}"
-        else:  # Shorten
-            return f"Shortened {scope_txt} by removing {date_range}{impact_text}"
+            paste_start = getattr(ch, "es_paste_start", ch.es_end)
+            paste_date = _fmt_mm(paste_start) if hasattr(ch, "es_paste_start") else format_date_range(paste_start, paste_start)
+            return f"Extended {scope_txt} by copying {date_range} to {paste_date}{impact_text}"
+        else:  # Remove
+            return f"Removed {scope_txt} data from {date_range}{impact_text}"
     
     # Fallback for any other cases
     date_range = format_date_range(ch.start_mm, ch.end_mm)
@@ -1757,6 +2150,13 @@ def df_with_changes(df_base: pd.DataFrame, changes: List[Dict]) -> pd.DataFrame:
             df_n = apply_add_project(df_base, df_n, ch.get("addproj_name", ""), ch.get("addproj_start", ""), time_cols)
             debug_log(f"🔍 Debug: df_n shape after Add Project: {df_n.shape}")
             continue
+        
+        if ch.get("kind") == "add_team":
+            debug_log(f"🔍 Debug: Processing Add Team change - team: {ch.get('addteam_name')}, start: {ch.get('addteam_start')}")
+            debug_log(f"🔍 Debug: df_n shape before Add Team: {df_n.shape}")
+            df_n = apply_add_team(df_base, df_n, ch.get("addteam_name", ""), ch.get("addteam_start", ""), time_cols)
+            debug_log(f"🔍 Debug: df_n shape after Add Team: {df_n.shape}")
+            continue
 
         row_mask = fast_scope_mask(df_n, ch.get("filters", {}))
 
@@ -1785,14 +2185,21 @@ def df_with_changes(df_base: pd.DataFrame, changes: List[Dict]) -> pd.DataFrame:
         
         if es_mode == "Extend":
             debug_log(f"🔍 Debug: Applying Extend operation")
+            paste_start = ch.get("es_paste_start") or ch.get("es_end") or time_cols[-1]
             apply_extend(df_n, row_mask, time_cols,
                          ch.get("es_start") or ch.get("start_mm", time_cols[0]),
-                         ch.get("es_end")   or ch.get("end_mm",   time_cols[-1]))
-        elif es_mode == "Shorten":
-            debug_log(f"🔍 Debug: Applying Shorten operation")
+                         ch.get("es_end")   or ch.get("end_mm",   time_cols[-1]),
+                         paste_start=paste_start)
+        elif es_mode == "Remove":
+            debug_log(f"🔍 Debug: Applying Remove operation")
             apply_shorten(df_n, row_mask, time_cols,
                           ch.get("es_start") or ch.get("start_mm", time_cols[0]),
                           ch.get("es_end")   or ch.get("end_mm",   time_cols[-1]))
+            # If no filters are set (removing all data), recalculate Start_Month and End_Month from actual data
+            filters = ch.get("filters", {})
+            if not any(filters.values()):
+                debug_log(f"🔍 Debug: No filters set, recalculating Start_Month and End_Month from actual data")
+                recalculate_project_dates_from_data(df_n, time_cols)
         else:
             debug_log(f"🔍 Debug: No Extend/Shorten operation found - es_mode is: '{es_mode}'")
         
@@ -1810,8 +2217,8 @@ if 'changes' not in st.session_state:
 
 if apply_clicked:
     # Build a change dict from the active selection
-    if change_pick == "(none)":
-        st.warning("Pick a change type first (Shift, Scale, Extend/Shorten, or Add Project).")
+    if change_pick is None:
+        st.warning("Pick a change type first (Shift, Scale, Extend, Remove, Add Project, or Add Team).")
         st.stop()
 
     # Generate a unique change ID
@@ -1898,45 +2305,77 @@ if apply_clicked:
             )
             change["desc"] = describe_change(temp_change)
 
-    elif change_pick == "Extend/Shorten":
-        mode = st.session_state.get("es_mode", "Extend")
-        
-        # Debug: Print what mode we're using
-        debug_log(f"🔍 Debug: Creating Extend/Shorten change with mode: {mode}")
-        debug_log(f"🔍 Debug: Session state es_mode: {st.session_state.get('es_mode')}")
-        
-        # Get the actual selected time range from the time range selector
-        # The create_time_range_selector function already called above returns the correct values
-        # We need to get them from the session state indices that were stored
+    elif change_pick == "Extend":
+        # Get the copy range and paste start from session state
         dynamic_time_cols = get_dynamic_time_options(df_raw, selected, time_cols)
         if not dynamic_time_cols:
-            dynamic_time_cols = time_cols  # fallback to all time columns
+            dynamic_time_cols = time_cols
         
-        # Get the indices that were stored by the time range selector
+        es_copy_start_idx = st.session_state.get("es_copy_start_idx", 0)
+        es_copy_end_idx = st.session_state.get("es_copy_end_idx", len(dynamic_time_cols) - 1)
+        # Ensure indices are within valid bounds
+        es_copy_start_idx = max(0, min(es_copy_start_idx, len(dynamic_time_cols) - 1))
+        es_copy_end_idx = max(0, min(es_copy_end_idx, len(dynamic_time_cols) - 1))
+        
+        min_paste_idx = min(es_copy_end_idx + 1, len(dynamic_time_cols) - 1)
+        es_paste_start_idx = st.session_state.get("es_paste_start_idx", min_paste_idx)
+        es_paste_start_idx = max(min_paste_idx, min(es_paste_start_idx, len(dynamic_time_cols) - 1))
+        es_paste_start_idx = max(0, min(es_paste_start_idx, len(dynamic_time_cols) - 1))
+        
+        es_copy_start = dynamic_time_cols[es_copy_start_idx]
+        es_copy_end = dynamic_time_cols[es_copy_end_idx]
+        es_paste_start = dynamic_time_cols[es_paste_start_idx]
+        
+        change.update({
+            "kind": "extend",
+            "es_mode": "Extend",
+            "es_start": es_copy_start,
+            "es_end": es_copy_end,
+            "es_paste_start": es_paste_start,
+            "start_mm": es_copy_start,
+            "end_mm": es_copy_end,
+        })
+        
+        # Create description
+        temp_change = Change(
+            id=change_id,
+            filters=selected,
+            start_mm=es_copy_start,
+            end_mm=es_copy_end,
+            shift_months=0,
+            scale_pct=0.0,
+            scale_abs=0.0,
+            active=True,
+            note="",
+            es_mode="Extend",
+            es_start=es_copy_start,
+            es_end=es_copy_end
+        )
+        temp_change.es_paste_start = es_paste_start
+        change["desc"] = describe_change(temp_change)
+        
+    elif change_pick == "Remove":
+        # Get the remove range from session state
+        dynamic_time_cols = get_dynamic_time_options(df_raw, selected, time_cols)
+        if not dynamic_time_cols:
+            dynamic_time_cols = time_cols
+        
         es_start_idx = st.session_state.get("es_start_idx", 0)
         es_end_idx = st.session_state.get("es_end_idx", len(dynamic_time_cols) - 1)
         
-        # Ensure indices are within bounds
-        es_start_idx = max(0, min(es_start_idx, len(dynamic_time_cols) - 1))
-        es_end_idx = max(es_start_idx, min(es_end_idx, len(dynamic_time_cols) - 1))
-        
-        # Get the actual month values
         es_start = dynamic_time_cols[es_start_idx]
         es_end = dynamic_time_cols[es_end_idx]
         
-        debug_log(f"🔍 Debug: Time range: {es_start} to {es_end}")
-        
         change.update({
-            "kind": "extend" if mode == "Extend" else "shorten",
-            "es_mode": mode,  # This is what the processing logic looks for
-            "es_start": es_start,  # Store the actual month values
+            "kind": "remove",
+            "es_mode": "Remove",
+            "es_start": es_start,
             "es_end": es_end,
             "start_mm": es_start,
             "end_mm": es_end,
         })
         
-        debug_log(f"🔍 Debug: Final change object: {change}")
-        # Create detailed description using the enhanced function
+        # Create description
         temp_change = Change(
             id=change_id,
             filters=selected,
@@ -1947,7 +2386,7 @@ if apply_clicked:
             scale_abs=0.0,
             active=True,
             note="",
-            es_mode=mode,
+            es_mode="Remove",
             es_start=es_start,
             es_end=es_end
         )
@@ -1978,6 +2417,34 @@ if apply_clicked:
             kind="add_project",
             addproj_name=pname,
             addproj_start=pstart
+        )
+        change["desc"] = describe_change(temp_change)
+    
+    elif change_pick == "Add Team":
+        tname = st.session_state.get("addteam_name", "")
+        tstart = st.session_state.get("addteam_start", time_cols[0])
+        if not tname:
+            st.warning("Pick a team to copy for Add Team.")
+            st.stop()
+        change.update({
+            "kind": "add_team",
+            "addteam_name": tname,
+            "addteam_start": tstart,
+        })
+        # Create detailed description using the enhanced function
+        temp_change = Change(
+            id=change_id,
+            filters=selected,
+            start_mm=tstart,
+            end_mm=tstart,
+            shift_months=0,
+            scale_pct=0.0,
+            scale_abs=0.0,
+            active=True,
+            note="",
+            kind="add_team",
+            addteam_name=tname,
+            addteam_start=tstart
         )
         change["desc"] = describe_change(temp_change)
 
@@ -2066,55 +2533,45 @@ tab1 = st.tabs(["📊 Dashboard"])[0]  # Only show Dashboard tab
 
 with tab1:
     # ============================================================
+    # Resource View Toggle (Top Center)
+    # ============================================================
+    col_left, col_center, col_right = st.columns([0.3, 0.4, 0.3])
+    with col_center:
+        resource_view = st.radio(
+            "",
+            ["Spend", "FTE"],
+            horizontal=True,
+            key="resource_view_toggle",
+            index=0
+        )
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    
+    # ============================================================
     # Buttons Row (YoY Trend left, buttons right)
     # ============================================================
     tg_left, spacer_mid, btn_right = st.columns([0.55, 0.20, 0.25])
     with tg_left:
         tg_c1, tg_c2 = st.columns([0.45, 0.55])
         with tg_c1:
-            target_on = st.toggle("YoY Growth Trend", value=False)
+            target_on = st.toggle("MoM Growth Trend", value=False)
             st.markdown('<div class="yoy-compact">', unsafe_allow_html=True)
-            yoy_whole = st.number_input("YoY %", min_value=-100, max_value=500, value=5, step=1, key="yoy_input")
+            mom_whole = st.number_input("MoM %", min_value=-100, max_value=500, value=5, step=1, key="yoy_input")
             st.markdown('</div>', unsafe_allow_html=True)
         with tg_c2:
             st.empty()
-        growth_rate = (yoy_whole or 0) / 100.0
+        growth_rate = (mom_whole or 0) / 100.0
 
-        b1, b2, b3 = st.columns(3)
+        b1, b2 = st.columns([1, 1])
         with b1:
             if st.button("Clear WIF", use_container_width=True):
                 st.session_state["pending_clear"] = True
                 st.rerun()
         with b2:
-            pop = st.popover("Save", use_container_width=True)
+            pop = st.popover("Save and Export", use_container_width=True)
             with pop:
-                name = st.text_input("Name this WIF (HTML report)", value="MyScenario")
-                if st.button("Create & download"):
-                    figs = {
-                        "3-Year Total Spending by Year": st.session_state.get("fig_year"),
-                        "Burden & GSD": st.session_state.get("fig_bgsd"),
-                        "5-Year Spending Profile": st.session_state.get("fig_area"),
-                        "Gantt": st.session_state.get("fig_gantt"),
-                    }
-                    html_parts = [f"<h1>EasyWIF — {name}</h1>", "<h3>Summary</h3>"]
-                    for title, fig in figs.items():
-                        if fig is not None:
-                            html_parts.append(f"<h4>{title}</h4>")
-                            html_parts.append(pio.to_html(fig, include_plotlyjs='cdn', full_html=False))
-                    df_delta = st.session_state.get("df_delta")
-                    if df_delta is not None:
-                        html_parts.append("<h3>Delta Table — Current vs New</h3>")
-                        html_parts.append(df_delta.to_html(index=False))
-                    changes = st.session_state.get("changes", [])
-                    html_parts.append("<h3>Change Log</h3>")
-                    html_parts.append("<ul>" + "".join([f"<li>{(c.get('note') or '')}</li>" for c in changes]) + "</ul>")
-                    report_html = "<html><head><meta charset='utf-8'></head><body>" + "\n".join(html_parts) + "</body></html>"
-                    st.download_button("Download HTML", data=report_html.encode("utf-8"),
-                                       file_name=f"{name}.html", mime="text/html", use_container_width=True)
-        with b3:
-            pop2 = st.popover("Export", use_container_width=True)
-            with pop2:
-                export_name = st.text_input("Export name (no extension)", value="EasyWIF_Changes")
+                export_name = st.text_input("Name (no extension)", value="EasyWIF_Scenario")
+                
+                # Prepare data for exports
                 df0 = st.session_state["df_raw"]
                 dfN = df_new_all
                 # df0 = original (df_raw), dfN = new (df_new_all) after applying changes
@@ -2127,22 +2584,40 @@ with tab1:
                 # Compare for any month changed
                 diffs = (aN_aln.values != a0_aln.values)
                 changed_mask = diffs.any(axis=1)
-
-                # The aligned index is aN_aln.index; changed rows in the *new* frame are:
                 changed_idx = aN_aln.index[changed_mask]
-
-                # Example: build an "updated rows only" DataFrame for export
-                updated_rows = dfN.reindex(changed_idx).copy()
-
-                changed_df = dfN.loc[diffs.any(axis=1)].copy()
-                if changed_df.empty:
-                    st.info("No changed rows to export yet.")
+                
+                # Create full dataset with UPDATED column
+                df_full_export = dfN.copy()
+                df_full_export["UPDATED"] = df_full_export.index.isin(changed_idx)
+                
+                # Prepare change log for export
+                changes = st.session_state.get("changes", [])
+                change_log_data = []
+                for idx, ch in enumerate(changes, 1):
+                    change_log_data.append({
+                        "Change #": idx,
+                        "Description": ch.get("desc", ""),
+                        "Active": ch.get("active", True),
+                        "Note": ch.get("note", "")
+                    })
+                df_change_log = pd.DataFrame(change_log_data)
+                
+                st.markdown("---")
+                st.markdown("**Download New Data**")
+                if df_full_export.empty:
+                    st.info("No data to export yet.")
                 else:
                     try:
                         import openpyxl  # noqa: F401
                         xbuf = io.BytesIO()
                         with pd.ExcelWriter(xbuf, engine="openpyxl") as writer:
-                            changed_df.to_excel(writer, index=False, sheet_name="Changes")
+                            # Sheet 1: Change Log
+                            if not df_change_log.empty:
+                                df_change_log.to_excel(writer, index=False, sheet_name="Change Log")
+                            else:
+                                pd.DataFrame({"Message": ["No changes recorded"]}).to_excel(writer, index=False, sheet_name="Change Log")
+                            # Sheet 2: Full dataset with NEW DATA
+                            df_full_export.to_excel(writer, index=False, sheet_name="Data")
                         xbuf.seek(0)
                         st.download_button("Download .xlsx", data=xbuf,
                             file_name=f"{export_name}.xlsx",
@@ -2151,18 +2626,536 @@ with tab1:
                         )
                     except Exception as e:
                         st.warning(f"Excel export unavailable ({e}). Use CSV below.")
-                    csv_bytes = changed_df.to_csv(index=False).encode("utf-8")
+                    
+                    # CSV export (single file with change log as header comment, then data)
+                    csv_parts = []
+                    if not df_change_log.empty:
+                        csv_parts.append("# Change Log\n")
+                        csv_parts.append(df_change_log.to_csv(index=False))
+                        csv_parts.append("\n# Full Dataset with NEW DATA\n")
+                    csv_parts.append(df_full_export.to_csv(index=False))
+                    csv_bytes = "".join(csv_parts).encode("utf-8")
                     st.download_button("Download .csv", data=csv_bytes,
                         file_name=f"{export_name}.csv", mime="text/csv",
                         use_container_width=True
                     )
+                
+                st.markdown("---")
+                st.markdown("**Download Visual**")
+                # Collect all available figures
+                figs = {
+                    "Total Resources by Month": st.session_state.get("fig_year"),
+                    "5-Year Spending Profile": st.session_state.get("fig_area"),
+                    "Gantt": st.session_state.get("fig_gantt"),
+                    "Resources by Dimension": st.session_state.get("fig_dept"),
+                }
+                # Add Burden & GSD if available
+                if st.session_state.get("fig_bgsd") is not None:
+                    figs["Burden & GSD"] = st.session_state.get("fig_bgsd")
+                html_parts = [f"<h1>EasyWIF — {export_name}</h1>", "<h3>Summary</h3>"]
+                for title, fig in figs.items():
+                    if fig is not None:
+                        html_parts.append(f"<h4>{title}</h4>")
+                        html_parts.append(pio.to_html(fig, include_plotlyjs='cdn', full_html=False))
+                
+                df_delta = st.session_state.get("df_delta")
+                if df_delta is not None:
+                    html_parts.append("<h3>Delta Table — Current vs New</h3>")
+                    html_parts.append(df_delta.to_html(index=False))
+                
+                # Add Change Log to HTML
+                html_parts.append("<h3>Change Log</h3>")
+                if changes:
+                    html_parts.append("<ul>")
+                    for ch in changes:
+                        desc = ch.get("desc", "")
+                        note = ch.get("note", "")
+                        active = ch.get("active", True)
+                        status = "✓ Active" if active else "✗ Inactive"
+                        if note:
+                            html_parts.append(f"<li><strong>{status}:</strong> {desc} <em>({note})</em></li>")
+                        else:
+                            html_parts.append(f"<li><strong>{status}:</strong> {desc}</li>")
+                    html_parts.append("</ul>")
+                else:
+                    html_parts.append("<p>No changes recorded.</p>")
+                
+                # Create comprehensive dark theme CSS
+                dark_theme_css = """
+                <style>
+                    body { 
+                        font-family: Arial, sans-serif; 
+                        margin: 20px; 
+                        background-color: #000000;
+                        color: #ffffff;
+                    }
+                    h1 { 
+                        color: #ffffff; 
+                        margin-top: 20px;
+                        margin-bottom: 20px;
+                    }
+                    h3 { 
+                        color: #ffffff; 
+                        margin-top: 30px;
+                        margin-bottom: 15px;
+                    }
+                    h4 { 
+                        color: #ffffff; 
+                        margin-top: 20px;
+                        margin-bottom: 10px;
+                    }
+                    ul { 
+                        line-height: 1.6;
+                        color: #ffffff;
+                    }
+                    li {
+                        color: #ffffff;
+                        margin-bottom: 8px;
+                    }
+                    p {
+                        color: #ffffff;
+                    }
+                    strong {
+                        color: #ffffff;
+                    }
+                    em {
+                        color: #e0e0e0;
+                    }
+                    /* Style tables with dark theme */
+                    table {
+                        border-collapse: collapse;
+                        width: 100%;
+                        margin: 20px 0;
+                        background-color: #1a1a1a;
+                        color: #ffffff;
+                    }
+                    th {
+                        background-color: #2a2a2a;
+                        color: #ffffff;
+                        padding: 12px;
+                        text-align: left;
+                        border: 1px solid #444444;
+                        font-weight: bold;
+                    }
+                    td {
+                        background-color: #1a1a1a;
+                        color: #ffffff;
+                        padding: 10px;
+                        border: 1px solid #444444;
+                    }
+                    tr:nth-child(even) {
+                        background-color: #252525;
+                    }
+                    tr:hover {
+                        background-color: #333333;
+                    }
+                    /* Ensure plotly charts maintain their styling */
+                    .js-plotly-plot {
+                        background-color: transparent;
+                    }
+                </style>
+                """
+                report_html = f"<html><head><meta charset='utf-8'>{dark_theme_css}</head><body>" + "\n".join(html_parts) + "</body></html>"
+                st.download_button("Download HTML", data=report_html.encode("utf-8"),
+                                   file_name=f"{export_name}.html", mime="text/html", use_container_width=True)
 
     st.markdown("---")
 
     # ============================================================
-    # Summary Row (3 columns): Total Spend (3y), Burden&GSD, Delta Table (3y)
+    # Resource Profile
     # ============================================================
-    sum_left, g1, sum_mid, g2, sum_right = st.columns([0.32, 0.02, 0.32, 0.02, 0.32])
+    debug_log(f"🔍 Debug: ENTERING PROFILE CHART SECTION")
+    debug_log(f"🔍 Debug: About to generate profile chart - show_new: {show_new}")
+    # Filter by Resource_Type based on resource_view toggle
+    resource_view_profile = st.session_state.get("resource_view_toggle", "Spend")
+    if "Resource_Type" in df_current.columns:
+        if resource_view_profile == "Spend":
+            df_current_profile = df_current[df_current["Resource_Type"] == "Spend"].copy()
+            df_new_profile = df_new[df_new["Resource_Type"] == "Spend"].copy() if show_new else df_current_profile
+            df_new_all_profile = df_new_all[df_new_all["Resource_Type"] == "Spend"].copy() if show_new else df_current_profile
+        else:  # FTE - show Headcount data
+            df_current_profile = df_current[df_current["Resource_Type"] == "Headcount"].copy()
+            df_new_profile = df_new[df_new["Resource_Type"] == "Headcount"].copy() if show_new else df_current_profile
+            df_new_all_profile = df_new_all[df_new_all["Resource_Type"] == "Headcount"].copy() if show_new else df_current_profile
+    else:
+        df_current_profile = df_current.copy()
+        df_new_profile = df_new.copy() if show_new else df_current_profile
+        df_new_all_profile = df_new_all.copy() if show_new else df_current_profile
+
+    st.markdown('<div class="tight-title">Resource Profile</div>', unsafe_allow_html=True)
+
+    # Get all available time columns (including extended data from changes)
+    all_time_cols_profile = set(time_cols)
+    if show_new and df_new_all_profile is not None:
+        new_cols = [c for c in df_new_all_profile.columns if _is_yyyymm(c)]
+        all_time_cols_profile.update(new_cols)
+    if df_current_profile is not None:
+        current_cols = [c for c in df_current_profile.columns if _is_yyyymm(c)]
+        all_time_cols_profile.update(current_cols)
+    all_time_cols_profile = sorted(list(all_time_cols_profile), key=lambda x: yyyymm_to_dt(x))
+
+    cur_series_all = total_series(df_current_profile, all_time_cols_profile).astype(float)
+    # Ensure cur_series_all is indexed by all_time_cols_profile
+    if not cur_series_all.index.equals(pd.Index(all_time_cols_profile)):
+        cur_series_all = cur_series_all.reindex(all_time_cols_profile, fill_value=0.0)
+
+    all_months_sorted = pd.Series([yyyymm_to_dt(mm) for mm in all_time_cols_profile], index=all_time_cols_profile)
+    valid_idx2 = all_months_sorted.notna()
+    # Use numpy array indexing to avoid index alignment issues
+    valid_mask = valid_idx2.values
+    all_months_sorted = all_months_sorted.iloc[valid_mask]
+    cur_series_all = pd.Series(cur_series_all.values[valid_mask], index=all_months_sorted.index)
+
+    # Get new series data if available
+    new_series_all = None
+    if show_new:
+        debug_log("Generating 'New' profile chart trace")
+        # Use df_new_profile (filtered data) when filters are active, df_new_all_profile (full data) when no filters
+        if any(selected.values()):  # If any filters are active
+            new_series_all = total_series(df_new_profile, all_time_cols_profile).astype(float)
+            debug_log("Using filtered data (df_new_profile) for profile chart")
+        else:
+            new_series_all = total_series(df_new_all_profile, all_time_cols_profile).astype(float)
+            debug_log("Using full data (df_new_all_profile) for profile chart")
+        
+        # Ensure new_series_all is indexed by all_time_cols_profile
+        if not new_series_all.index.equals(pd.Index(all_time_cols_profile)):
+            new_series_all = new_series_all.reindex(all_time_cols_profile, fill_value=0.0)
+        new_series_all = pd.Series(new_series_all.values[valid_mask], index=all_months_sorted.index)
+        
+        # Debug: Check what data the profile chart is using
+        debug_log(f"Profile chart - new_series_all sum: ${new_series_all.sum():,.0f}")
+
+    # Find the actual data range - include all months with non-zero data
+    all_series_data = {}
+    for i, month in enumerate(all_months_sorted):
+        val = cur_series_all.iloc[i] if i < len(cur_series_all) else 0.0
+        if val > 0 or (new_series_all is not None and i < len(new_series_all) and new_series_all.iloc[i] > 0):
+            all_series_data[month] = val
+
+    if new_series_all is not None:
+        for i, month in enumerate(all_months_sorted):
+            if i < len(new_series_all):
+                val = new_series_all.iloc[i]
+                if val > 0 or month in all_series_data:
+                    all_series_data[month] = max(all_series_data.get(month, 0), val)
+
+    # Get the actual date range from data (not just DISPLAY_YEARS)
+    if all_series_data:
+        data_months = sorted(all_series_data.keys())
+        x_min_data = data_months[0]
+        x_max_data = data_months[-1]
+        # Add a small buffer (1 month on each side)
+        x_min = x_min_data - pd.DateOffset(months=1)
+        x_max = x_max_data + pd.DateOffset(months=1)
+    else:
+        x_min = all_months_sorted.min() if len(all_months_sorted) > 0 else X_MIN
+        x_max = all_months_sorted.max() if len(all_months_sorted) > 0 else X_MAX
+
+    # Filter series to only show months within the data range (but include all data, not just 5 years)
+    data_range_mask = (all_months_sorted >= x_min) & (all_months_sorted <= x_max)
+    cur_series = cur_series_all[data_range_mask]
+    months_display = all_months_sorted[data_range_mask]
+
+    fig_area = go.Figure()
+    fig_area.add_trace(go.Scatter(
+        x=months_display, y=cur_series, fill='tozeroy', mode='lines',
+        name='Current', line=dict(width=2, color=COLOR_CURRENT), line_shape='linear'
+    ))
+    if show_new and new_series_all is not None:
+        new_series = new_series_all[data_range_mask]
+        fig_area.add_trace(go.Scatter(
+            x=months_display, y=new_series, fill='tozeroy', mode='lines',
+            name='New', line=dict(width=2, color=COLOR_NEW, dash='dot'), line_shape='linear'
+        ))
+    else:
+        debug_log("show_new is False, not generating 'New' profile chart trace")
+    if target_on:
+        debug_log(f"MoM Growth calculation - growth_rate: {growth_rate}")
+        
+        # Calculate MoM (Month-over-Month) trend - apply growth rate to each month
+        if len(cur_series) > 0:
+            first_month_val = float(cur_series.iloc[0])
+            debug_log(f"MoM Growth calculation - first month value: {first_month_val}")
+            
+            if first_month_val > 0:
+                # Calculate monthly targets based on MoM growth rate
+                targets = [first_month_val]
+                for i in range(1, len(months_display)):
+                    targets.append(targets[-1] * (1.0 + growth_rate))
+                
+                debug_log(f"MoM Growth calculation - targets array length: {len(targets)}")
+                
+                if len(targets) > 0 and len(months_display) > 0:
+                    fig_area.add_trace(go.Scatter(
+                        x=months_display, y=targets,
+                        mode="lines", name="MoM Trend",
+                        line=dict(color=COLOR_TARGET, width=1.5),
+                        hovertemplate="Target: %{y:.0f}<extra></extra>"
+                    ))
+                else:
+                    debug_log("MoM Growth calculation - No valid targets")
+            else:
+                debug_log("MoM Growth calculation - First month value is 0, skipping MoM trend")
+        else:
+            debug_log("MoM Growth calculation - No data available, skipping MoM trend")
+
+    # Set y-axis label based on resource_view
+    y_axis_label_profile = "FTE" if resource_view_profile == "FTE" else "Spending ($)"
+
+    # Auto-scale y-axis: find the actual data range from all displayed data
+    all_data = list(cur_series.values)
+    if show_new and new_series_all is not None:
+        new_series_display = new_series_all[data_range_mask]
+        all_data.extend(new_series_display.values)
+    if all_data:
+        y_max = max(all_data) * 1.1 if max(all_data) > 0 else 1.0
+        y_min = 0
+    else:
+        y_max = 1.0
+        y_min = 0
+
+    fig_area.update_layout(
+        template=PLOTLY_TEMPLATE,
+        xaxis_title=None, yaxis_title=y_axis_label_profile,
+        xaxis=dict(
+            tickfont=dict(size=13), 
+            tickformat="%b '%y",  # Format: Jan '26, Feb '26, etc
+            dtick="M1",  # Show every month
+            range=[x_min, x_max],
+            tickangle=-45
+        ),
+        yaxis=dict(range=[y_min, y_max], tickfont=dict(size=13)),
+        legend=dict(
+            font=dict(size=12),
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1.0
+        ),
+        font=dict(size=13),
+        margin=dict(t=40, r=10, l=10, b=50),
+        height=320
+    )
+    st.plotly_chart(fig_area, use_container_width=True)
+    st.session_state["fig_area"] = fig_area
+
+    st.markdown("---")
+
+    # ============================================================
+    # Project View
+    # ============================================================
+    st.markdown('<div class="tight-title">Project View</div>', unsafe_allow_html=True)
+
+    need = {"Project", "Start_Month", "End_Month", "Workstream"}
+    if not need.issubset(df_current.columns):
+        st.info("Gantt needs columns: Project, Start_Month, End_Month, Workstream.")
+    else:
+        # Use df_new (filtered data) when filters are active, df_new_all (full data) when no filters
+        if show_new:
+            if any(selected.values()):  # If any filters are active
+                source_df = df_new
+                debug_log("Using filtered data (df_new) for Gantt chart")
+            else:
+                source_df = df_new_all
+                debug_log("Using full data (df_new_all) for Gantt chart")
+        else:
+            source_df = df_current
+        
+        # Convert Start_Month and End_Month to datetime
+        def parse_month_date(month_str):
+            """Parse MM/YYYY or YYYY-MM format to datetime. Handles extended periods where months 13-24 represent next year."""
+            if pd.isna(month_str):
+                return pd.NaT
+            month_str = str(month_str).strip()
+            try:
+                # Try MM/YYYY format first
+                if '/' in month_str:
+                    parts = month_str.split('/')
+                    if len(parts) == 2:
+                        month, year = int(parts[0]), int(parts[1])
+                        # Handle extended periods: months 13-24 = months 1-12 of following year
+                        if month > 12:
+                            year += (month - 1) // 12
+                            month = ((month - 1) % 12) + 1
+                        return pd.to_datetime(f"{year}-{month:02d}-01", format="%Y-%m-%d", errors="coerce")
+                # Try YYYY-MM format
+                elif '-' in month_str:
+                    parts = month_str.split('-')
+                    if len(parts) == 2:
+                        year, month = int(parts[0]), int(parts[1])
+                        # Handle extended periods: months 13-24 = months 1-12 of following year
+                        if month > 12:
+                            year += (month - 1) // 12
+                            month = ((month - 1) % 12) + 1
+                        return pd.to_datetime(f"{year}-{month:02d}-01", format="%Y-%m-%d", errors="coerce")
+            except:
+                pass
+            return pd.NaT
+        
+        gantt_df = source_df[["Project", "Start_Month", "End_Month", "Workstream"]].copy()
+        gantt_df["Start_Date"] = gantt_df["Start_Month"].apply(parse_month_date)
+        gantt_df["End_Date"] = gantt_df["End_Month"].apply(parse_month_date)
+        
+        # Group by Project and Workstream, taking min start and max end
+        agg = (
+            gantt_df.groupby(["Project", "Workstream"])
+            .agg({"Start_Date": "min", "End_Date": "max"})
+            .reset_index()
+        )
+        
+        agg = agg.dropna(subset=["Start_Date", "End_Date"])
+        if agg.empty:
+            st.write("No projects match current filters.")
+        else:
+            agg = agg.sort_values("Start_Date", ascending=True)
+            order = agg["Project"].tolist()
+            all_workstreams = sorted(df_raw["Workstream"].dropna().astype(str).unique()) \
+                              if "Workstream" in df_raw.columns else sorted(agg["Workstream"].astype(str).unique())
+            palette = px.colors.qualitative.Set2
+            color_map = {ws: palette[i % len(palette)] for i, ws in enumerate(all_workstreams)}
+            
+            # Auto-scale x-axis based on data
+            x_min = agg["Start_Date"].min() if len(agg) > 0 else X_MIN
+            x_max = agg["End_Date"].max() if len(agg) > 0 else X_MAX
+            
+            fig_g = px.timeline(
+                agg, x_start="Start_Date", x_end="End_Date", y="Project",
+                color="Workstream", template=PLOTLY_TEMPLATE,
+                color_discrete_map=color_map
+            )
+            
+            fig_g.update_layout(
+                xaxis=dict(
+                    range=[x_min, x_max], 
+                    tickformat="%b '%y",  # Format: Jan '26, Feb '26, etc
+                    dtick="M1",
+                    title=None, 
+                    type="date", 
+                    tickfont=dict(size=12),
+                    tickangle=-45
+                ),
+                yaxis=dict(
+                    title=None, 
+                    categoryorder="array", 
+                    categoryarray=order, 
+                    automargin=True,
+                    tickfont=dict(size=13)
+                ),
+                legend=dict(
+                    orientation="h", 
+                    yanchor="bottom", 
+                    y=1.02, 
+                    xanchor="left", 
+                    x=0.0,
+                    title_text="Workstream", 
+                    font=dict(size=13)
+                ),
+                template=PLOTLY_TEMPLATE,
+                font=dict(size=13),
+                height=max(400, min(30 * len(order), 1200)),
+                margin=dict(t=60, r=20, b=80, l=10),
+            )
+            st.plotly_chart(fig_g, use_container_width=True)
+            st.session_state["fig_gantt"] = fig_g
+
+    st.markdown("---")
+
+    # ============================================================
+    # Summary Row (2 columns): Total Resources by Month, Resources by Dimension
+    # ============================================================
+    
+    # Filter by Resource_Type based on resource_view toggle (for both charts)
+    resource_view = st.session_state.get("resource_view_toggle", "Spend")
+    if "Resource_Type" in df_current.columns:
+        if resource_view == "Spend":
+            df_current_filtered = df_current[df_current["Resource_Type"] == "Spend"].copy()
+            df_new_filtered = df_new[df_new["Resource_Type"] == "Spend"].copy() if show_new else df_current_filtered
+            df_new_all_filtered = df_new_all[df_new_all["Resource_Type"] == "Spend"].copy() if show_new else df_current_filtered
+        else:  # FTE - show Headcount data
+            df_current_filtered = df_current[df_current["Resource_Type"] == "Headcount"].copy()
+            df_new_filtered = df_new[df_new["Resource_Type"] == "Headcount"].copy() if show_new else df_current_filtered
+            df_new_all_filtered = df_new_all[df_new_all["Resource_Type"] == "Headcount"].copy() if show_new else df_current_filtered
+    else:
+        df_current_filtered = df_current.copy()
+        df_new_filtered = df_new.copy() if show_new else df_current_filtered
+        df_new_all_filtered = df_new_all.copy() if show_new else df_current_filtered
+    
+    # Helper function to get all time columns from dataframes (including extended data)
+    def get_all_time_columns() -> List[str]:
+        """Get all time columns from current and new data, including any extended columns"""
+        all_time_cols = set(time_cols)  # Start with original time columns
+        
+        # Add any time columns from df_new_all that might have been added via Extend
+        if show_new and df_new_all_filtered is not None:
+            new_cols = [c for c in df_new_all_filtered.columns if _is_yyyymm(c)]
+            all_time_cols.update(new_cols)
+        
+        # Also check df_current_filtered for any additional time columns
+        if df_current_filtered is not None:
+            current_cols = [c for c in df_current_filtered.columns if _is_yyyymm(c)]
+            all_time_cols.update(current_cols)
+        
+        # Sort the columns chronologically
+        all_time_cols_list = sorted(list(all_time_cols), key=lambda x: yyyymm_to_dt(x))
+        return all_time_cols_list
+    
+    # Helper function to get time window column indices (defined here before use)
+    def get_time_window_columns(time_window: str, time_cols_local: List[str], df_data: pd.DataFrame = None) -> List[str]:
+        """Convert time window selection to list of column names"""
+        if time_window == "Entire Horizon":
+            # For Entire Horizon, use all available time columns including extended data
+            return get_all_time_columns()
+        
+        # Get current month index (first column with data, or first column if no data check)
+        current_idx = 0
+        if df_data is not None and len(df_data) > 0:
+            # Find first column with non-zero data
+            for i, col in enumerate(time_cols_local):
+                if col in df_data.columns:
+                    col_sum = df_data[col].apply(pd.to_numeric, errors="coerce").fillna(0).sum()
+                    if col_sum > 0:
+                        current_idx = i
+                        break
+        
+        if time_window == "Current Month":
+            return [time_cols_local[current_idx]] if current_idx < len(time_cols_local) else []
+        elif time_window == "Next 3 Months":
+            end_idx = min(current_idx + 3, len(time_cols_local))
+            return time_cols_local[current_idx:end_idx]
+        elif time_window == "Next 6 Months":
+            end_idx = min(current_idx + 6, len(time_cols_local))
+            return time_cols_local[current_idx:end_idx]
+        elif time_window == "Next 12 Months":
+            end_idx = min(current_idx + 12, len(time_cols_local))
+            return time_cols_local[current_idx:end_idx]
+        else:
+            return time_cols_local
+    
+    # Get time columns for selected window (use combined data to find current month)
+    df_combined = pd.concat([df_current_filtered, df_new_all_filtered if show_new else df_current_filtered], ignore_index=True)
+    
+    # Get all available time columns (including extended data)
+    all_available_time_cols = get_all_time_columns()
+    
+    # Time Window Dropdown at top center (tight and clean)
+    col_time_left, col_time_center, col_time_right = st.columns([0.4, 0.2, 0.4])
+    with col_time_center:
+        time_window = st.selectbox(
+            "Select Time Window",
+            ["Current Month", "Next 3 Months", "Next 6 Months", "Next 12 Months", "Entire Horizon"],
+            key="time_window_selector",
+            index=1,  # Default to "Next 3 Months"
+            label_visibility="visible"
+        )
+    
+    # Add spacing between time window dropdown and graph titles
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+    
+    window_cols = get_time_window_columns(time_window, all_available_time_cols, df_combined)
+    
+    sum_left, g1, sum_right = st.columns([0.49, 0.02, 0.49])
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def year_totals(df_: pd.DataFrame, years: List[int]) -> pd.DataFrame:
@@ -2189,502 +3182,263 @@ def year_totals(df_: pd.DataFrame, years: List[int]) -> pd.DataFrame:
     
     return out.sort_values("year")
 
+# Helper function to get all years that have data in the dataframe
+def get_all_years_with_data(df_: pd.DataFrame) -> List[int]:
+    """Dynamically detect all years that have data in the dataframe"""
+    m = df_[time_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
+    months_all = pd.to_datetime([yyyymm_to_dt(mm) for mm in time_cols])
+    s = pd.DataFrame({"month": months_all, "total": m.sum(axis=0).to_numpy()})
+    s["year"] = s["month"].dt.year
+    years_with_data = s[s["total"] > 0]["year"].unique().tolist()
+    return sorted(years_with_data) if years_with_data else DISPLAY_YEARS
+
+# Helper function for year totals without headcount filtering (used when Resource_Type filtering is applied)
+def year_totals_no_filter(df_: pd.DataFrame, years: List[int] = None) -> pd.DataFrame:
+    if years is None:
+        years = get_all_years_with_data(df_)
+    m = df_[time_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
+    months_all = pd.to_datetime([yyyymm_to_dt(mm) for mm in time_cols])
+    s = pd.DataFrame({"month": months_all, "total": m.sum(axis=0).to_numpy()})
+    s["year"] = s["month"].dt.year
+    out = s[s["year"].isin(years)].groupby("year", as_index=False)["total"].sum()
+    for y in years:
+        if y not in out["year"].values:
+            out = pd.concat([out, pd.DataFrame({"year":[y], "total":[0.0]})], ignore_index=True)
+    return out.sort_values("year")
+
 with sum_left:
-    debug_log("ENTERING SUMMARY CHART SECTION")
-    st.markdown('<div class="tight-title">3-Year Total Spending by Year — Current vs New</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tight-title">Total Resources by Month</div>', unsafe_allow_html=True)
     
-    # Debug: Check what data we're passing to year_totals
-    debug_log(f"df_current shape before year_totals: {df_current.shape}")
-    debug_log(f"df_new_all shape before year_totals: {df_new_all.shape}")
+    # Get month-over-month data for the selected time window
+    # Current data
+    cur_monthly = df_current_filtered[window_cols].apply(pd.to_numeric, errors="coerce").fillna(0).sum()
+    cur_dates = [yyyymm_to_dt(mm) for mm in window_cols]
+    cur_df = pd.DataFrame({
+        "Month": cur_dates,
+        "Total": cur_monthly.values,
+        "Series": "Current"
+    })
     
-    yr_cur = year_totals(df_current, YEARS3)
+    # New data
     if show_new:
-        # Use df_new (filtered data) when filters are active, df_new_all (full data) when no filters
-        # This ensures charts show impact on the filtered data, not the entire dataset
-        if any(selected.values()):  # If any filters are active
-            yr_new = year_totals(df_new, YEARS3)
-            debug_log("Using filtered data (df_new) for summary chart")
+        if any(selected.values()):
+            new_monthly = df_new_filtered[window_cols].apply(pd.to_numeric, errors="coerce").fillna(0).sum()
         else:
-            yr_new = year_totals(df_new_all, YEARS3)
-            debug_log("Using full data (df_new_all) for summary chart")
-        
-        # Debug: Check what the summary chart is showing
-        debug_log(f"Summary chart - Current totals: {yr_cur['total'].tolist()}")
-        debug_log(f"Summary chart - New totals: {yr_new['total'].tolist()}")
-        
-        # Show the impact on filtered data specifically
-        if "Group Initiative" in df_current.columns and any(c.get("es_mode") in ["Extend", "Shorten"] for c in st.session_state.get("changes", [])):
-            # Calculate impact on filtered data only
-            filtered_mask_current = df_current["Group Initiative"] == "GI1- Falcon Connect"
-            filtered_mask_new = df_new_all["Group Initiative"] == "GI1- Falcon Connect"
-            if filtered_mask_current.any():
-                filtered_cur = year_totals(df_current[filtered_mask_current], YEARS3)
-                filtered_new = year_totals(df_new_all[filtered_mask_new], YEARS3)
-                debug_log(f"Filtered data impact - Current: {filtered_cur['total'].tolist()}")
-                debug_log(f"Filtered data impact - New: {filtered_new['total'].tolist()}")
-                
-
-        
-        ydf = yr_cur.merge(yr_new, on="year", how="outer", suffixes=("_Current", "_New")).fillna(0)
-        y_long = ydf.melt("year", ["total_Current","total_New"], var_name="Profile", value_name="Total")
-        y_long["Profile"] = y_long["Profile"].str.replace("total_","",regex=False)
+            new_monthly = df_new_all_filtered[window_cols].apply(pd.to_numeric, errors="coerce").fillna(0).sum()
+        new_dates = [yyyymm_to_dt(mm) for mm in window_cols]
+        new_df = pd.DataFrame({
+            "Month": new_dates,
+            "Total": new_monthly.values,
+            "Series": "New"
+        })
+        month_long = pd.concat([cur_df, new_df], ignore_index=True)
     else:
-        y_long = yr_cur.rename(columns={"total":"Total"}).assign(Profile="Current")
-    y_long = y_long.assign(Total_M = y_long["Total"] / 1_000_000.0)
-
-    fig_year = px.bar(
-        y_long, x="year", y="Total_M", color="Profile", barmode="group",
+        month_long = cur_df
+    
+    # Format month labels for x-axis
+    month_long["Month_Label"] = month_long["Month"].dt.strftime("%b '%y")
+    
+    # For FTE, don't divide; for Spend, divide by 1K
+    if resource_view == "FTE":
+        month_long = month_long.assign(Total_Display = month_long["Total"])
+        text_template = "%{y:.1f}"
+        y_axis_label = "FTE"
+    else:
+        month_long = month_long.assign(Total_Display = month_long["Total"] / 1_000.0)
+        text_template = "%{y:.1f}K"
+        y_axis_label = "$K"
+    
+    # Create line/area chart for month-over-month
+    fig_month = px.bar(
+        month_long, x="Month_Label", y="Total_Display", color="Series", barmode="group",
         template=PLOTLY_TEMPLATE, color_discrete_map={"Current": COLOR_CURRENT, "New": COLOR_NEW}
     )
-    # Ensure consistent template application
-    fig_year.update_layout(template=PLOTLY_TEMPLATE)
-    fig_year.update_layout(
-        xaxis_title=None, yaxis_title="$M",
-        xaxis=dict(dtick=1, tickfont=dict(size=13), position=0.0, showgrid=False),
-        yaxis=dict(tickfont=dict(size=13), showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
+    
+    # Auto-scale y-axis
+    y_max = month_long["Total_Display"].max() * 1.1 if len(month_long) > 0 else 1.0
+    y_min = 0
+    
+    # Adjust data label font size based on number of months (smaller for Entire Horizon)
+    num_months = len(month_long["Month_Label"].unique())
+    if num_months > 24:  # Entire Horizon or very long range
+        label_font_size = 8
+        tick_font_size = 9
+    elif num_months > 12:
+        label_font_size = 9
+        tick_font_size = 10
+    else:
+        label_font_size = 11
+        tick_font_size = 11
+    
+    fig_month.update_layout(
+        xaxis_title=None, yaxis_title=y_axis_label,
+        xaxis=dict(tickfont=dict(size=tick_font_size), tickangle=-45, showgrid=False),
+        yaxis=dict(tickfont=dict(size=13), showgrid=True, gridcolor='rgba(128,128,128,0.2)', range=[y_min, y_max]),
         legend=dict(
+            title_text="",  # Remove legend title
             font=dict(size=12),
-            orientation="h",  # Horizontal legend to save space
+            orientation="h",
             yanchor="top",
-            y=-0.15,  # Position below the chart
+            y=-0.35,  # Move legend further down to create more space
             xanchor="center",
             x=0.5
         ),
         font=dict(size=13),
         bargap=0.18,
-        margin=dict(t=40, r=10, l=10, b=50),  # Consistent bottom margin for x-axis alignment
-        height=310,  # Match the Burden & GSD chart height
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)'
-    )
-    fig_year.update_traces(texttemplate="%{y:.1f}M", textposition="outside", cliponaxis=False, textfont=dict(size=13))
-
-    if target_on:
-        debug_log(f"Summary chart YoY - growth_rate: {growth_rate}")
-        debug_log(f"Summary chart YoY - YEARS3: {YEARS3}")
-        debug_log(f"Summary chart YoY - yr_cur: {yr_cur.to_dict('records')}")
-        
-        base_map = dict(zip(yr_cur["year"], yr_cur["total"]))
-        base = float(base_map.get(YEARS3[0], 0.0))
-        debug_log(f"Summary chart YoY - base value: {base}")
-        
-        if base > 0:
-            t_vals = [base]
-            for _ in range(1, len(YEARS3)):
-                t_vals.append(t_vals[-1] * (1.0 + growth_rate))
-            t_vals_M = [v / 1_000_000.0 for v in t_vals]
-            debug_log(f"Summary chart YoY - target values: {t_vals_M}")
-            
-            fig_year.add_trace(go.Scatter(
-                x=YEARS3, y=t_vals_M, mode="lines+markers+text",
-                text=[f"{v:.1f}M" for v in t_vals_M],
-                textposition="bottom center", textfont=dict(size=12),
-                name="YoY Trend",  # Shorter name to save space
-                line=dict(color=COLOR_TARGET, width=1.5),
-                marker=dict(size=5, color=COLOR_TARGET),
-            ))
-        else:
-            debug_log("Summary chart YoY - Base value is 0, skipping YoY trend")
-    st.plotly_chart(fig_year, use_container_width=True)
-    st.session_state["fig_year"] = fig_year
-
-with sum_mid:
-    st.markdown('<div class="tight-title">3-Year Burden & GSD — Current vs New</div>', unsafe_allow_html=True)
-
-    @st.cache_data(ttl=300)  # Cache for 5 minutes
-    def totals_b_g(df_: pd.DataFrame) -> tuple[float, float]:
-        # Don't filter out headcount rows for burden/GSD - we want all spending data
-        # df_ = df_[~is_headcount_row(df_)]
-        if df_.empty:
-            return 0.0, 0.0
-
-        # Create 3-year time columns (2025, 2026, 2027 only)
-        months_all = pd.to_datetime([yyyymm_to_dt(mm) for mm in time_cols])
-        years = pd.Series([dt.year for dt in months_all], index=time_cols)
-        time_cols_3y = [col for col, year in zip(time_cols, years) if year in YEARS3]
-        
-        debug_log(f"3-year time columns: {time_cols_3y}")
-        debug_log(f"3-year period: {YEARS3}")
-
-        # Check for Burden vs GSD column first
-        if "Burden vs GSD" in df_.columns:
-            unique_cats = df_["Burden vs GSD"].astype(str).str.lower().unique()
-            debug_log(f"Burden vs GSD values: {unique_cats}")
-            
-            cats = df_["Burden vs GSD"].astype(str).str.lower()
-            burden_mask = cats.str.contains("burden", case=False, na=False)
-            gsd_mask = cats.str.contains("gsd", case=False, na=False)
-            
-            debug_log(f"Burden rows found: {burden_mask.sum()}, GSD rows found: {gsd_mask.sum()}")
-            
-            b = df_[burden_mask][time_cols_3y].apply(pd.to_numeric, errors="coerce").fillna(0).to_numpy().sum()
-            g = df_[gsd_mask][time_cols_3y].apply(pd.to_numeric, errors="coerce").fillna(0).to_numpy().sum()
-            
-        elif "Category" in df_.columns:
-            unique_cats = df_["Category"].astype(str).str.lower().unique()
-            debug_log(f"Category values: {unique_cats}")
-            
-            cats = df_["Category"].astype(str).str.lower()
-            # More flexible matching - look for any string containing "burden" or "gsd"
-            burden_mask = cats.str.contains("burden", case=False, na=False)
-            gsd_mask = cats.str.contains("gsd", case=False, na=False)
-            
-            debug_log(f"Category - Burden rows found: {burden_mask.sum()}, GSD rows found: {gsd_mask.sum()}")
-            
-            b = df_[burden_mask][time_cols_3y].apply(pd.to_numeric, errors="coerce").fillna(0).to_numpy().sum()
-            g = df_[gsd_mask][time_cols_3y].apply(pd.to_numeric, errors="coerce").fillna(0).to_numpy().sum()
-            
-        else:
-            # If no category split, treat all as Burden and zero for GSD
-            b = df_[time_cols_3y].apply(pd.to_numeric, errors="coerce").fillna(0).to_numpy().sum()
-            g = 0.0
-
-        debug_log(f"3-year Burden total: ${b:,.0f}, GSD total: ${g:,.0f}")
-        return float(b), float(g)
-
-    # ---- build the stacked chart (outside the function!) ----
-    b_cur, g_cur = totals_b_g(df_current)
-    
-    # Debug output to understand the data
-    if "Category" in df_current.columns:
-        unique_cats = df_current["Category"].astype(str).str.lower().unique()
-        debug_log(f"Available categories: {unique_cats}")
-    if "Burden vs GSD" in df_current.columns:
-        unique_burden_gsd = df_current["Burden vs GSD"].astype(str).str.lower().unique()
-        debug_log(f"Available Burden vs GSD values: {unique_burden_gsd}")
-    
-    debug_log(f"Current - Burden total: ${b_cur:,.0f}, GSD total: ${g_cur:,.0f}")
-    
-    # Check if there are any changes applied
-    if show_new:
-        debug_log(f"Changes applied: {len(st.session_state.get('changes', []))}")
-        for i, change in enumerate(st.session_state.get('changes', [])):
-            debug_log(f"Change {i+1}: {change.get('desc', 'No description')}")
-    if show_new:
-        # Use df_new (filtered data) when filters are active, df_new_all (full data) when no filters
-        if any(selected.values()):  # If any filters are active
-            b_new, g_new = totals_b_g(df_new)
-            debug_log("Using filtered data (df_new) for burden & GSD chart")
-        else:
-            b_new, g_new = totals_b_g(df_new_all)
-            debug_log("Using full data (df_new_all) for burden & GSD chart")
-        
-        debug_log(f"New - Burden total: ${b_new:,.0f}, GSD total: ${g_new:,.0f}")
-        debug_log(f"Burden change: ${b_new - b_cur:+,.0f}, GSD change: ${g_new - g_cur:+,.0f}")
-        
-        xcats = ["Current", "New"]
-        y_burden_M = [b_cur/1_000_000.0, b_new/1_000_000.0]
-        y_gsd_M    = [g_cur/1_000_000.0, g_new/1_000_000.0]
-    else:
-        xcats = ["Current"]
-        y_burden_M = [b_cur/1_000_000.0]
-        y_gsd_M    = [g_cur/1_000_000.0]
-
-    fig_bgsd = go.Figure()
-    fig_bgsd.add_bar(
-        x=xcats, y=y_burden_M, name="Burden",
-        marker_color=COLOR_CURRENT_BURDEN if len(xcats)==1 else [COLOR_CURRENT_BURDEN, COLOR_NEW_BURDEN][:len(xcats)],
-        text=[f"{v:,.1f}M" for v in y_burden_M],
-        textposition="outside", cliponaxis=False, textfont=dict(size=13)
-    )
-    fig_bgsd.add_bar(
-        x=xcats, y=y_gsd_M, name="GSD",
-        marker_color=COLOR_CURRENT_GSD if len(xcats)==1 else [COLOR_CURRENT_GSD, COLOR_NEW_GSD][:len(xcats)],
-        text=[f"{v:,.1f}M" for v in y_gsd_M],
-        textposition="inside", insidetextanchor="end", textfont=dict(size=12)
-    )
-    totals = [y_burden_M[i] + y_gsd_M[i] for i in range(len(xcats))]
-    for i, x in enumerate(xcats):
-        fig_bgsd.add_annotation(
-            x=x, y=totals[i], text=f"{totals[i]:,.1f}M",
-            showarrow=False, yshift=18, font=dict(size=12)
-        )
-
-    fig_bgsd.update_layout(
-        barmode="stack", template=PLOTLY_TEMPLATE,
-        xaxis_title=None, yaxis_title="$M",
-        xaxis=dict(tickfont=dict(size=13), position=0.0, showgrid=False),
-        yaxis=dict(tickfont=dict(size=13), showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
-        legend=dict(
-            font=dict(size=12),
-            orientation="h",  # Horizontal legend to save space
-            yanchor="top",
-            y=-0.15,  # Position below the chart
-            xanchor="center",
-            x=0.5
-        ),
-        font=dict(size=13),
-        margin=dict(t=40, r=10, l=10, b=50),  # Consistent margins with summary chart
+        margin=dict(t=40, r=10, l=10, b=130),  # Increase bottom margin to accommodate legend
         height=310,
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)'
     )
-    st.plotly_chart(fig_bgsd, use_container_width=True)
-    st.session_state["fig_bgsd"] = fig_bgsd
+    fig_month.update_traces(texttemplate=text_template, textposition="outside", cliponaxis=False, textfont=dict(size=label_font_size))
 
+    st.plotly_chart(fig_month, use_container_width=True)
+    st.session_state["fig_year"] = fig_month
 
 with sum_right:
-    st.markdown('<div class="tight-title">Delta Table — Current vs New</div>', unsafe_allow_html=True)
-
-    def year_totals_only(df_):
-        m = df_[time_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
-        months_all = pd.to_datetime([yyyymm_to_dt(mm) for mm in time_cols])
-        s = pd.DataFrame({"month": months_all, "total": m.sum(axis=0).to_numpy()})
-        s["year"] = s["month"].dt.year
-        out = s[s["year"].isin(YEARS3)].groupby("year", as_index=False)["total"].sum()
-        return out.set_index("year").reindex(YEARS3).fillna(0.0)["total"]
-
-    cur_spend = year_totals_only(df_current)
-    if show_new:
-        # Use df_new (filtered data) when filters are active, df_new_all (full data) when no filters
-        if any(selected.values()):  # If any filters are active
-            new_spend = year_totals_only(df_new)
-            debug_log("Using filtered data (df_new) for delta table")
-        else:
-            new_spend = year_totals_only(df_new_all)
-            debug_log("Using full data (df_new_all) for delta table")
+    # Dimension selector
+    dimension_options = []
+    if "Department" in df_current_filtered.columns:
+        dimension_options.append("Department")
+    if "Team" in df_current_filtered.columns:
+        dimension_options.append("Team")
+    if "Project" in df_current_filtered.columns:
+        dimension_options.append("Project")
+    
+    if not dimension_options:
+        st.info("No dimension columns (Department, Team, Project) found in data.")
     else:
-        new_spend = cur_spend*0
-
-    def burden_gsd_by_year_3y(df_):
-        months_all = pd.to_datetime([yyyymm_to_dt(mm) for mm in time_cols])
-        years = pd.Series([dt.year for dt in months_all], index=time_cols)
-        df_m = df_[time_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
-        df_m.columns = years.values
-        totals_by_year = df_m.groupby(axis=1, level=0).sum()
-        if "Category" in df_.columns:
-            cats = df_["Category"].astype(str).str.lower()
-            # More flexible matching - look for any string containing "burden" or "gsd"
-            burden_mask = cats.str.contains("burden", case=False, na=False)
-            gsd_mask = cats.str.contains("gsd", case=False, na=False)
-            b = totals_by_year.loc[burden_mask].sum()
-            g = totals_by_year.loc[gsd_mask].sum()
-        elif "Burden vs GSD" in df_.columns:
-            cats = df_["Burden vs GSD"].astype(str).str.lower()
-            burden_mask = cats.str.contains("burden", case=False, na=False)
-            gsd_mask = cats.str.contains("gsd", case=False, na=False)
-            b = totals_by_year.loc[burden_mask].sum()
-            g = totals_by_year.loc[gsd_mask].sum()
-        else:
-            b = totals_by_year.sum()
-            g = pd.Series(0.0, index=totals_by_year.columns)
-        b = b.reindex(YEARS3).fillna(0.0)
-        g = g.reindex(YEARS3).fillna(0.0)
-        return b, g
-
-    b_cur_y, g_cur_y = burden_gsd_by_year_3y(df_current)
-    if show_new:
-        # Use df_new (filtered data) when filters are active, df_new_all (full data) when no filters
-        if any(selected.values()):  # If any filters are active
-            b_new_y, g_new_y = burden_gsd_by_year_3y(df_new)
-            debug_log("Using filtered data (df_new) for burden & GSD by year")
-        else:
-            b_new_y, g_new_y = burden_gsd_by_year_3y(df_new_all)
-            debug_log("Using full data (df_new_all) for burden & GSD by year")
-    else:
-        b_new_y, g_new_y = b_cur_y*0, g_cur_y*0
-
-    def m(v): return round(float(v)/1_000_000.0, 2)
-    rows = []
-    for y in YEARS3:
-        rows.append([f"Spend {y}", m(cur_spend[y]), m(new_spend[y]), m(new_spend[y]-cur_spend[y])])
-    for y in YEARS3:
-        rows.append([f"Burden {y}", m(b_cur_y.get(y,0)), m(b_new_y.get(y,0)), m(b_new_y.get(y,0)-b_cur_y.get(y,0))])
-    for y in YEARS3:
-        rows.append([f"GSD {y}", m(g_cur_y.get(y,0)), m(g_new_y.get(y,0)), m(g_new_y.get(y,0)-g_cur_y.get(y,0))])
-    df_delta = pd.DataFrame(rows, columns=["Metric", "Current ($M)", "New ($M)", "Delta ($M)"])
-    st.dataframe(df_delta, hide_index=True, use_container_width=True, height=380)
-    st.session_state["df_delta"] = df_delta
-
-st.markdown("---")
-
-# ============================================================
-# 5-Year Spending Profile (area) + YoY Growth
-# ============================================================
-debug_log(f"🔍 Debug: ENTERING PROFILE CHART SECTION")
-debug_log(f"🔍 Debug: About to generate profile chart - show_new: {show_new}")
-st.markdown('<div class="tight-title">5-Year Spending Profile — Current vs New</div>', unsafe_allow_html=True)
-cur_series_all = total_series(df_current, time_cols).astype(float)
-all_months_sorted = pd.to_datetime([f"{mm}01" for mm in time_cols], format="%Y%m%d", errors="coerce")
-valid_idx2 = all_months_sorted.notna()
-all_months_sorted = all_months_sorted[valid_idx2]
-cur_series_all = cur_series_all[valid_idx2]
-mask_5y = pd.Series(all_months_sorted).dt.year.isin(DISPLAY_YEARS).to_numpy()
-cur_series = cur_series_all[mask_5y]
-months_5y = all_months_sorted[mask_5y]
-
-fig_area = go.Figure()
-fig_area.add_trace(go.Scatter(
-    x=months_5y, y=cur_series, fill='tozeroy', mode='lines',
-    name='Current', line=dict(width=2, color=COLOR_CURRENT), line_shape='linear'
-))
-if show_new:
-    debug_log("Generating 'New' profile chart trace")
-    # Use df_new (filtered data) when filters are active, df_new_all (full data) when no filters
-    if any(selected.values()):  # If any filters are active
-        new_series_all = total_series(df_new, time_cols).astype(float)
-        debug_log("Using filtered data (df_new) for profile chart")
-    else:
-        new_series_all = total_series(df_new_all, time_cols).astype(float)
-        debug_log("Using full data (df_new_all) for profile chart")
-    
-    new_series = new_series_all[mask_5y]
-    
-    # Debug: Check what data the profile chart is using
-    debug_log(f"Profile chart - new_series_all sum: ${new_series_all.sum():,.0f}")
-    debug_log(f"Profile chart - new_series sum: ${new_series.sum():,.0f}")
-    
-    fig_area.add_trace(go.Scatter(
-        x=months_5y, y=new_series, fill='tozeroy', mode='lines',
-        name='New', line=dict(width=2, color=COLOR_NEW, dash='dot'), line_shape='linear'
-))
-else:
-    debug_log("show_new is False, not generating 'New' profile chart trace")
-if target_on:
-    debug_log(f"YoY Growth calculation - growth_rate: {growth_rate}")
-    debug_log(f"YoY Growth calculation - DISPLAY_YEARS: {DISPLAY_YEARS}")
-    
-    yr_cur = year_totals(df_current, DISPLAY_YEARS).set_index("year")["total"]
-    debug_log(f"YoY Growth calculation - year totals: {yr_cur.to_dict()}")
-    
-    base = float(yr_cur.get(DISPLAY_YEARS[0], 0.0))
-    debug_log(f"YoY Growth calculation - base value: {base}")
-    
-    if base > 0:
-        y_targets = [base]
-        for _ in range(1, len(DISPLAY_YEARS)):
-            y_targets.append(y_targets[-1]*(1.0+growth_rate))
-        debug_log(f"YoY Growth calculation - yearly targets: {y_targets}")
+        # Title with inline radio buttons for Group by
+        title_col_left, title_col_right = st.columns([0.6, 0.4])
+        with title_col_left:
+            st.markdown('<div class="tight-title">Resources by Category</div>', unsafe_allow_html=True)
+        with title_col_right:
+            selected_dimension = st.radio(
+                "",
+                dimension_options,
+                key="dimension_selector",
+                index=0,
+                horizontal=True,
+                label_visibility="collapsed"
+            )
         
-        months_full = pd.date_range(f"{DISPLAY_YEARS[0]}-01-01", f"{DISPLAY_YEARS[-1]}-12-31", freq="MS")
-        targets = []
-        for i, year in enumerate(DISPLAY_YEARS):
-            start_val = y_targets[i]/12.0
-            end_val = (y_targets[i+1]/12.0) if i+1 < len(y_targets) else (y_targets[i]/12.0)
-            year_months = pd.date_range(f"{year}-01-01", f"{year}-12-01", freq="MS")
-            for idx, _ in enumerate(year_months):
-                step = (end_val - start_val)/11.0 if i+1 < len(y_targets) else 0.0
-                targets.append(start_val + step*idx)
-        
-        mask_m = np.isin(months_full, months_5y)
-        debug_log(f"YoY Growth calculation - targets array length: {len(targets)}")
-        debug_log(f"YoY Growth calculation - mask_m sum: {mask_m.sum()}")
-        
-        if len(targets) > 0 and mask_m.sum() > 0:
-            fig_area.add_trace(go.Scatter(
-                x=months_full[mask_m], y=np.array(targets)[mask_m],
-                mode="lines", name="YoY Trend",  # Shorter name to save space
-                line=dict(color=COLOR_TARGET, width=1.5),
-                hovertemplate="Target: %{y:.0f}<extra></extra>"
-            ))
-        else:
-            debug_log("YoY Growth calculation - No valid targets or mask")
-    else:
-        debug_log("YoY Growth calculation - Base value is 0, skipping YoY trend")
-
-fig_area.update_layout(
-    template=PLOTLY_TEMPLATE,
-    xaxis_title=None, yaxis_title="Spending ($)",
-    xaxis=dict(tickfont=dict(size=13), tickformat="%b %Y", dtick="M6", range=[X_MIN, X_MAX]),
-    yaxis=dict(range=[0, min(axis_max * 0.6, 6000000)], tickfont=dict(size=13)),
-    legend=dict(
-        font=dict(size=12),
-        orientation="h",  # Horizontal legend to save space
-        yanchor="bottom",
-        y=1.02,  # Position above the chart
-        xanchor="right",
-        x=1.0
-    ),
-    font=dict(size=13),
-    margin=dict(t=40, r=10, l=10, b=10),  # Increased top margin for horizontal legend
-    height=320
-)
-st.plotly_chart(fig_area, use_container_width=True)
-st.session_state["fig_area"] = fig_area
-
-# ============================================================
-# Gantt (Group Initiative; TI/PO/PRQ; ticks every 6 months)
-# ============================================================
-with st.expander("Gantt (TI → PRQ) by Group Initiative with TI/PO/PRQ markers", expanded=True):
-    need = {"Group Initiative", "Swimlane", *DATE_COLUMNS}
-    if not need.issubset(df_current.columns):
-        st.info("Gantt needs columns: Group Initiative, Swimlane, TI Date, PO Date, PRQ Date.")
-    else:
-        # Use df_new (filtered data) when filters are active, df_new_all (full data) when no filters
+        # Use only New scenario data (or Current if no changes)
         if show_new:
-            if any(selected.values()):  # If any filters are active
-                source_df = df_new
-                debug_log("Using filtered data (df_new) for Gantt chart")
+            if any(selected.values()):
+                df_dim_data = df_new_filtered.copy()
             else:
-                source_df = df_new_all
-                debug_log("Using full data (df_new_all) for Gantt chart")
+                df_dim_data = df_new_all_filtered.copy()
         else:
-            source_df = df_current
-        agg = (
-            source_df.groupby(["Group Initiative", "Swimlane"])
-            .agg({"TI Date": "min", "PO Date": "min", "PRQ Date": "max"})
-            .reset_index()
-        )
+            df_dim_data = df_current_filtered.copy()
         
-        # Debug: Check PRQ dates for Falcon Connect
-        if "Group Initiative" in agg.columns:
-            falcon_gantt = agg[agg["Group Initiative"] == "GI1- Falcon Connect"]
-            if not falcon_gantt.empty:
-                debug_log(f"Gantt - Falcon Connect PRQ dates: {falcon_gantt['PRQ Date'].tolist()}")
-                debug_log(f"Gantt - Using source_df: {'df_new' if any(selected.values()) else 'df_new_all'}")
-            else:
-                debug_log("Gantt - Falcon Connect not found in aggregated data")
-
-        agg = agg.dropna(subset=["TI Date", "PRQ Date"])
-        if agg.empty:
-            st.write("No group initiatives match current filters.")
+        # Group by selected dimension and sum only the window columns
+        dim_grouped = df_dim_data.groupby(selected_dimension)[window_cols].sum().sum(axis=1).sort_values(ascending=False)
+        
+        # Filter to only dimensions with data
+        dims_with_data = dim_grouped[dim_grouped > 0].index.tolist()
+        if dims_with_data:
+            dim_grouped = dim_grouped[dim_grouped.index.isin(dims_with_data)]
         else:
-            agg = agg.sort_values("TI Date", ascending=True)
-            order = agg["Group Initiative"].tolist()
-            all_swimlanes = sorted(df_raw["Swimlane"].dropna().astype(str).unique()) \
-                            if "Swimlane" in df_raw.columns else sorted(agg["Swimlane"].astype(str).unique())
-            palette = px.colors.qualitative.Set2
-            color_map = {sl: palette[i % len(palette)] for i, sl in enumerate(all_swimlanes)}
+            dim_grouped = pd.Series(dtype=float)
+        
+        if len(dim_grouped) > 0:
+            dim_df = pd.DataFrame({
+                selected_dimension: dim_grouped.index.tolist(),
+                "Total": dim_grouped.values
+            })
+            
+            # For FTE, don't divide; for Spend, divide by 1K
+            if resource_view == "FTE":
+                dim_df = dim_df.assign(Total_Display = dim_df["Total"].fillna(0))
+                text_template = "%{y:.1f}"
+                y_axis_label = "FTE"
+            else:
+                # Handle division and avoid NaN - ensure Total is numeric and fill NaN with 0
+                dim_df["Total"] = pd.to_numeric(dim_df["Total"], errors="coerce").fillna(0)
+                dim_df = dim_df.assign(Total_Display = dim_df["Total"] / 1_000.0)
+                # Replace any NaN or inf values with 0
+                dim_df["Total_Display"] = dim_df["Total_Display"].replace([np.inf, -np.inf, np.nan], 0.0)
+                text_template = "%{y:.1f}K"
+                y_axis_label = "$K"
+            
+            # Filter out any rows with invalid Total_Display values before creating chart
+            dim_df = dim_df[dim_df["Total_Display"].notna() & (dim_df["Total_Display"] != np.inf) & (dim_df["Total_Display"] >= 0)]
+            
+            if len(dim_df) > 0:
+                # Create horizontal bar chart with dashboard theme colors
+                # Build color map for each category using a diverse color palette
+                category_list = dim_df[selected_dimension].tolist()
+                color_map = {}
+                # Use a palette that provides distinct colors for each category
+                # Mix of theme colors and complementary shades
+                color_palette = [
+                    COLOR_CURRENT,           # Blue
+                    COLOR_NEW,               # Green
+                    COLOR_CURRENT_BURDEN,    # Light Blue
+                    COLOR_NEW_BURDEN,        # Light Green
+                    "#ff7f0e",               # Orange
+                    "#d62728",               # Red
+                    "#9467bd",               # Purple
+                    "#8c564b",               # Brown
+                    "#e377c2",               # Pink
+                    "#7f7f7f",               # Gray
+                    "#bcbd22",               # Olive
+                    "#17becf",               # Cyan
+                ]
+                for i, cat in enumerate(category_list):
+                    # Cycle through the palette to ensure each category gets a unique color
+                    color_map[cat] = color_palette[i % len(color_palette)]
+                
+                fig_dim = px.bar(
+                    dim_df, x="Total_Display", y=selected_dimension, orientation='h',
+                    template=PLOTLY_TEMPLATE,
+                    color=selected_dimension,
+                    color_discrete_map=color_map
+                )
+                
+                # Auto-scale x-axis
+                x_max = dim_df["Total_Display"].max() * 1.1 if len(dim_df) > 0 and dim_df["Total_Display"].max() > 0 else 1.0
+                x_min = 0
+                
+                fig_dim.update_layout(
+                    xaxis_title=y_axis_label, yaxis_title=None,
+                    xaxis=dict(tickfont=dict(size=13), showgrid=True, gridcolor='rgba(128,128,128,0.2)', range=[x_min, x_max]),
+                    yaxis=dict(tickfont=dict(size=12), showgrid=False),
+                    showlegend=False,
+                    font=dict(size=13),
+                    margin=dict(t=40, r=10, l=10, b=50),
+                    height=310,
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)'
+                )
+                # Only show text labels for non-zero, non-NaN values to avoid NaNK
+                # Ensure all values are valid numbers
+                valid_labels = []
+                for val in dim_df["Total_Display"]:
+                    if pd.notna(val) and val > 0 and not np.isinf(val):
+                        if resource_view == "FTE":
+                            valid_labels.append(f"{val:.1f}")
+                        else:
+                            valid_labels.append(f"{val:.1f}K")
+                    else:
+                        valid_labels.append("")
+                
+                fig_dim.update_traces(
+                    texttemplate=valid_labels,
+                    textposition="outside",
+                    cliponaxis=False,
+                    textfont=dict(size=11)
+                )
+            
+            st.plotly_chart(fig_dim, use_container_width=True)
+            st.session_state["fig_dept"] = fig_dim
+        else:
+            st.info(f"No data found for {selected_dimension} in the selected time window.")
 
-            fig_g = px.timeline(
-                agg, x_start="TI Date", x_end="PRQ Date", y="Group Initiative",
-                color="Swimlane", template=PLOTLY_TEMPLATE,
-                color_discrete_map=color_map
-            )
-            fig_g.add_trace(go.Scatter(
-                x=agg["TI Date"], y=agg["Group Initiative"], mode="markers+text",
-                text=["TI"]*len(agg), textposition="top center",
-                marker_symbol="triangle-left", marker_size=8, marker_color="#cccccc",
-                name="TI", showlegend=False
-            ))
-            mask_po = agg["PO Date"].notna()
-            if mask_po.any():
-                fig_g.add_trace(go.Scatter(
-                    x=agg.loc[mask_po, "PO Date"], y=agg.loc[mask_po, "Group Initiative"],
-                    mode="markers+text", text=["PO"]*mask_po.sum(), textposition="top center",
-                    marker_symbol="x", marker_size=8, marker_color="#cccccc",
-                    name="PO", showlegend=False
-                ))
-            fig_g.add_trace(go.Scatter(
-                x=agg["PRQ Date"], y=agg["Group Initiative"], mode="markers+text",
-                text=["PRQ"]*len(agg), textposition="top center",
-                marker_symbol="triangle-right", marker_size=8, marker_color="#cccccc",
-                name="PRQ", showlegend=False
-            ))
-            fig_g.update_layout(
-                xaxis=dict(range=[X_MIN, X_MAX], tickformat="%b %Y", dtick="M6",
-                           title=None, type="date", tickfont=dict(size=13)),
-                yaxis=dict(title=None, categoryorder="array", categoryarray=order, automargin=True,
-                           tickfont=dict(size=13)),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0.0,
-                            title_text="Swimlane", font=dict(size=13)),
-                template=PLOTLY_TEMPLATE,
-                font=dict(size=13),
-                height=max(520, min(26 * len(order), 1200)),
-                margin=dict(t=40, r=20, b=40, l=10),
-            )
-            st.plotly_chart(fig_g, use_container_width=True)
-            st.session_state["fig_gantt"] = fig_g
+
+    # Add spacing and horizontal separator before Change Log
+    st.markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
+    st.markdown("---")
 
 # ============================================================
 # Change Log
