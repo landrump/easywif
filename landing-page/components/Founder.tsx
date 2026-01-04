@@ -41,7 +41,7 @@ export default function Founder() {
           {/* Founder Image - appears second on mobile, left side on desktop */}
           <div className="order-2 md:order-1">
             <Image
-              src="/Paul headshot in modern office.png"
+              src="/Paul headshot outside.png"
               alt="Paul Landrum"
               width={500}
               height={600}
