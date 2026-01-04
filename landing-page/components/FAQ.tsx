@@ -26,7 +26,7 @@ const faqs: FAQItem[] = [
   },
   {
     question: 'How do demos work?',
-    answer: 'Book a demo and we\'ll schedule a personalized walkthrough. You can use your actual data or we can work with a template that matches your format. The demo is founder-led, so you\'ll get direct answers to your questions.',
+    answer: 'Book a demo and we\'ll schedule a personalized walkthrough. We\'ll use simulated data or a template that matches your format to show how EasyWIF works. You\'ll get direct answers to your questions.',
   },
   {
     question: 'What does early access mean?',

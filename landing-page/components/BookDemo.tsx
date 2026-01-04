@@ -35,7 +35,7 @@ export default function BookDemo() {
             Want to see it with your workflow?
           </h2>
           <p className="text-xl text-navy-light">
-            Book a demo and we'll walk through EasyWIF using demo data or a quick template close to your format.
+            Book a demo and we'll walk through EasyWIF using simulated data or a quick template close to your format.
           </p>
         </div>
 

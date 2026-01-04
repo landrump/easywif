@@ -1,12 +1,12 @@
 export default function EarlyAccess() {
   const features = [
     {
-      title: 'Founder-led walkthrough',
+      title: 'Personalized walkthrough',
       description: 'Get a personalized demo that shows how EasyWIF works with your specific planning needs.',
     },
     {
-      title: 'Use your data or a close template',
-      description: 'We can work with your actual data or use a template that matches your format to show real value.',
+      title: 'Demo with simulated data',
+      description: 'We'll use simulated data or a template that matches your format to show how EasyWIF works with your planning needs.',
     },
     {
       title: 'Fast feedback loop',
