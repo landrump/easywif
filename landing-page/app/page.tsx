@@ -2,6 +2,8 @@ import Navigation from '@/components/Navigation'
 import Hero from '@/components/Hero'
 import Problem from '@/components/Problem'
 import HowItWorks from '@/components/HowItWorks'
+import MobileCompatibility from '@/components/MobileCompatibility'
+import Founder from '@/components/Founder'
 import Product from '@/components/Product'
 import UseCases from '@/components/UseCases'
 import EarlyAccess from '@/components/EarlyAccess'
@@ -17,6 +19,8 @@ export default function Home() {
       <Hero />
       <Problem />
       <HowItWorks />
+      <MobileCompatibility />
+      <Founder />
       <Product />
       <UseCases />
       <EarlyAccess />
