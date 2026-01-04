@@ -8,7 +8,7 @@ export default function Founder() {
           {/* Main text - appears first on mobile, right side on desktop */}
           <div className="order-1 md:order-2 space-y-6">
             <h2 className="text-3xl md:text-4xl font-bold text-navy">
-              Built by someone who's lived the problem
+              Built by those who have lived the problem
             </h2>
             <p className="text-lg text-navy-light leading-relaxed">
               EasyWIF was created by an 18-year technology and operations leader who has spent years managing forecasts, roadmaps, and resource plans across real teams and real constraints.
@@ -41,7 +41,7 @@ export default function Founder() {
           {/* Founder Image - appears second on mobile, left side on desktop */}
           <div className="order-2 md:order-1">
             <Image
-              src="/Paul_EasyWIF Avatar.png"
+              src="/Paul headshot in modern office.png"
               alt="Paul Landrum"
               width={500}
               height={600}

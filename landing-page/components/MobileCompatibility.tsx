@@ -20,13 +20,13 @@ export default function MobileCompatibility() {
           </div>
 
           {/* Right: Image (Desktop) / Below Text (Mobile) */}
-          <div className="order-2 md:order-2">
+          <div className="order-2 md:order-2 flex justify-center">
             <Image
               src="/EasyWIF Mobile View.png"
               alt="EasyWIF mobile view"
-              width={600}
-              height={800}
-              className="rounded-lg shadow-xl w-full h-auto"
+              width={350}
+              height={467}
+              className="rounded-lg shadow-xl max-w-[350px] md:max-w-[400px] h-auto"
             />
           </div>
         </div>
