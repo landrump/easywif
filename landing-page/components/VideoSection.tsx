@@ -1,6 +1,6 @@
 export default function VideoSection() {
-  // YouTube video ID from https://youtu.be/rh4UtH3IVH8
-  const youtubeVideoId = 'rh4UtH3IVH8'
+  // YouTube video ID from https://youtu.be/PEROpboQ4S4
+  const youtubeVideoId = 'PEROpboQ4S4'
   const youtubeEmbedUrl = `https://www.youtube.com/embed/${youtubeVideoId}?rel=0`
 
   return (
