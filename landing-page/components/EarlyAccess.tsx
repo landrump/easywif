@@ -7,7 +7,7 @@ export default function EarlyAccess() {
     },
     {
       title: 'Demo with simulated data',
-      description: 'We'll use simulated data or a template that matches your format to show how EasyWIF works with your planning needs.',
+      description: 'We\'ll use simulated data or a template that matches your format to show how EasyWIF works with your planning needs.',
     },
     {
       title: 'Fast feedback loop',
