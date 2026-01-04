@@ -1,4 +1,5 @@
 export default function EarlyAccess() {
+  // Features for early access demos
   const features = [
     {
       title: 'Personalized walkthrough',
